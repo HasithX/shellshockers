@@ -1,11 +1,14 @@
-# Shell Shockers Aimbot & ESP (ST v3.0)
+# Shell Shockers Aimbot & ESP (ST v3.1)
 
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
-- **Cyber Blue Modern Menu (v3.0 Upgrade):**
-  - Rebranded from legacy LM to **ST v3.0**.
-  - Complete overhaul to a futuristic **Cyber Blue / Azure Neon** glassmorphic interface with vibrant gradients, custom tabs, interactive buttons, and high-visibility status indicators.
+- **Tactical Innovations (v3.1 Upgrade):**
+  - `💣 Grenade Arc Trajectory Predictor`: Real-time 3D physics parabolic curve predicting the exact flight path, gravity drop, and landing/impact spot before throwing grenades.
+  - `🔭 Sniper Zoom (Binoculars Mode)`: Hold **[KeyC]** (configurable) with ANY weapon to smoothly zoom camera FOV down to 25° for high-powered reconnaissance and distant target tracking.
+  - `📊 On-Screen Session Stats Widget (HUD)`: Glassmorphic Cyber Blue top-left corner widget displaying real-time **FPS Counter**, **Killstreak (with 🔥 fire aura)**, **Total Kills**, **Deaths**, and **K/D Ratio**, plus instant kill-confirmed notifications.
+- **Cyber Blue Modern Menu:**
+  - Futuristic **Cyber Blue / Azure Neon** glassmorphic interface with vibrant gradients, custom tabs, interactive buttons, and high-visibility status indicators.
   - Floating circular **ST** quick-access badge with hover animations.
 - **Advanced Shoot Point & Tactical HUD:**
   - `Center Shoot Point Reticle`: High-precision glowing crosshair dot and focus reticle that never disappears or goes missing.
@@ -41,7 +44,7 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ### 1-Click Install / Update
 If you have **Violentmonkey** or **Tampermonkey** installed, open this link in your browser:
-👉 **[Install ST v3.0](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
+👉 **[Install ST v3.1](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
 
 The extension will pop up with an **Install** or **Update** button. Click it, then refresh Shell Shockers.
 
@@ -54,6 +57,7 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 ## 🎮 Controls
 - **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `ST` button)
 - **Aim Key:** Hold `Right Mouse Button` (Mouse2)
+- **Sniper Zoom (Binoculars):** Hold `C` (configurable in Combat tab)
 - **Save Safe Point:** `G`
 - **Teleport to Nearest Safe Point:** `H`
 

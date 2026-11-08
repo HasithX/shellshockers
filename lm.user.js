@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (ST v3.0)
+// @name         Shell Shockers Aimbot + ESP (ST v3.1)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      3.0.0
+// @version      3.1.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern cyber blue GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, modern cyber blue GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -72,6 +72,11 @@
         shootPointStyle: 'cyber',
         fovColor: '#00f0ff',
         fovDynamicColor: true,
+        grenadeTrajectory: true,
+        sniperZoom: true,
+        zoomKey: 'KeyC',
+        zoomFov: 25,
+        statsHud: true,
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -1665,6 +1670,173 @@
         } catch (e) { }
     }
 
+    // ================= GRENADE TRAJECTORY PREDICTOR =================
+    let grenadeMesh = null;
+    function updateGrenadeTrajectory(me) {
+        if (!S.grenadeTrajectory || !me || !ss.SCENE) {
+            if (grenadeMesh) grenadeMesh.setEnabled(false);
+            return;
+        }
+
+        const actor = (H.actor && me[H.actor]) ? me[H.actor] : (me.ba || null);
+        const m = actor ? (actor[H.mesh] || actor.mesh) : null;
+        if (!m || !m.position) {
+            if (grenadeMesh) grenadeMesh.setEnabled(false);
+            return;
+        }
+
+        const yaw = me[H.yaw];
+        const pitch = -me[H.pitch];
+        const fwdX = -Math.sin(yaw) * Math.cos(pitch);
+        const fwdY = -Math.sin(pitch);
+        const fwdZ = -Math.cos(yaw) * Math.cos(pitch);
+
+        let curX = m.position.x;
+        let curY = m.position.y + 0.4;
+        let curZ = m.position.z;
+
+        const v0 = 20.0;
+        const gravity = 18.0;
+        const dt = 0.045;
+
+        let vx = fwdX * v0;
+        let vy = fwdY * v0;
+        let vz = fwdZ * v0;
+
+        const points = [new BABYLON.Vector3(curX, curY, curZ)];
+        const TOTAL_POINTS = 36;
+
+        for (let i = 0; i < TOTAL_POINTS - 1; i++) {
+            const nextX = curX + vx * dt;
+            const nextY = curY + vy * dt - 0.5 * gravity * dt * dt;
+            const nextZ = curZ + vz * dt;
+            vy -= gravity * dt;
+
+            const fromVec = new BABYLON.Vector3(curX, curY, curZ);
+            const toVec = new BABYLON.Vector3(nextX, nextY, nextZ);
+            const segVec = toVec.subtract(fromVec);
+            const dist = segVec.length();
+
+            if (dist > 0.01) {
+                const ray = new BABYLON.Ray(fromVec, segVec.normalize(), dist);
+                const hit = ss.SCENE.pickWithRay(ray, mesh => {
+                    if (!mesh) return false;
+                    if (mesh.name && (mesh.name.includes('esp') || mesh.name.includes('box') || mesh.name.includes('tracer') || mesh.name.includes('st_grenade'))) return false;
+                    return true;
+                });
+
+                if (hit && hit.hit && hit.pickedPoint) {
+                    points.push(hit.pickedPoint.clone());
+                    break;
+                }
+            }
+
+            points.push(new BABYLON.Vector3(nextX, nextY, nextZ));
+            curX = nextX;
+            curY = nextY;
+            curZ = nextZ;
+            if (curY < -25) break;
+        }
+
+        const lastPt = points[points.length - 1];
+        while (points.length < TOTAL_POINTS) {
+            points.push(lastPt.clone());
+        }
+
+        try {
+            if (!grenadeMesh) {
+                grenadeMesh = BABYLON.MeshBuilder.CreateLines('st_grenade_line', { points, updatable: true }, ss.SCENE);
+                grenadeMesh.isPickable = false;
+                grenadeMesh.alwaysSelectAsActiveMesh = true;
+                grenadeMesh.doNotSyncBoundingInfo = true;
+                if (H.renderingGroupId) grenadeMesh[H.renderingGroupId] = 1;
+                grenadeMesh.color = BABYLON.Color3.FromHexString('#00f0ff');
+            } else {
+                grenadeMesh.setEnabled(true);
+                BABYLON.MeshBuilder.CreateLines(undefined, { points, instance: grenadeMesh, updatable: true });
+            }
+        } catch (e) { }
+    }
+
+    // ================= ON-SCREEN SESSION STATS HUD =================
+    let statsHud = null;
+    let fpsFrames = 0, lastFpsUpdate = performance.now(), currentFps = 60;
+    let sessionKills = 0, sessionDeaths = 0, currentStreak = 0, maxStreak = 0;
+    let wasAlive = false;
+    const enemyHpMap = new Map();
+
+    function ensureStatsHud() {
+        if (statsHud && document.body && document.body.contains(statsHud)) return statsHud;
+        if (statsHud) { try { statsHud.remove(); } catch (e) { } }
+        statsHud = document.createElement('div');
+        statsHud.id = 'st-stats-widget';
+        statsHud.style.cssText = 'position:fixed;top:12px;left:12px;z-index:2147483500;pointer-events:none;background:rgba(10,18,30,.88);border:1px solid rgba(0,180,216,.45);border-radius:8px;padding:6px 12px;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;color:#e2e8f0;display:flex;align-items:center;gap:12px;box-shadow:0 4px 18px rgba(0,0,0,.6), 0 0 10px rgba(0,180,216,.2);user-select:none;transition:opacity .2s ease';
+        document.body.appendChild(statsHud);
+        return statsHud;
+    }
+
+    function updateStatsHud(me) {
+        const hud = ensureStatsHud();
+        if (!S.statsHud || !S.enabled) {
+            hud.style.display = 'none';
+            return;
+        }
+        hud.style.display = 'flex';
+
+        fpsFrames++;
+        const now = performance.now();
+        if (now - lastFpsUpdate >= 500) {
+            currentFps = Math.round((fpsFrames * 1000) / (now - lastFpsUpdate));
+            fpsFrames = 0;
+            lastFpsUpdate = now;
+        }
+
+        if (me) {
+            const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
+            const myPlaying = !!me[H.playing] && myHp > 0;
+            if (wasAlive && !myPlaying) {
+                sessionDeaths++;
+                currentStreak = 0;
+                wasAlive = false;
+            } else if (!wasAlive && myPlaying) {
+                wasAlive = true;
+            }
+        }
+
+        if (typeof ss !== 'undefined' && Array.isArray(ss.PLAYERS)) {
+            for (const P of ss.PLAYERS) {
+                if (!P || P === me) continue;
+                const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : 100);
+                const prev = enemyHpMap.get(P);
+                if (typeof prev === 'number') {
+                    if (prev > 0 && (pHp <= 0 || !P[H.playing])) {
+                        if (Date.now() - lastShotAt < 2500) {
+                            sessionKills++;
+                            currentStreak++;
+                            if (currentStreak > maxStreak) maxStreak = currentStreak;
+                            showToast(`🎯 KILL CONFIRMED! (+1) Streak: ${currentStreak}`);
+                        }
+                    }
+                }
+                enemyHpMap.set(P, pHp);
+            }
+        }
+
+        const kd = sessionDeaths > 0 ? (sessionKills / sessionDeaths).toFixed(1) : sessionKills;
+        const streakColor = currentStreak >= 5 ? '#ff0055' : (currentStreak >= 3 ? '#ffea00' : '#38bdf8');
+        const streakFire = currentStreak >= 3 ? ' 🔥' : '';
+
+        hud.innerHTML = `
+            <div><span style="color:#00e5ff;font-weight:bold">ST</span></div>
+            <div><span style="color:#64748b">FPS:</span> <b style="color:#38bdf8">${currentFps}</b></div>
+            <div><span style="color:#64748b">Streak:</span> <b style="color:${streakColor}">${currentStreak}${streakFire}</b></div>
+            <div><span style="color:#64748b">Kills:</span> <b style="color:#10b981">${sessionKills}</b></div>
+            <div><span style="color:#64748b">Deaths:</span> <b style="color:#ef4444">${sessionDeaths}</b></div>
+            <div><span style="color:#64748b">K/D:</span> <b style="color:#c084fc">${kd}</b></div>
+        `;
+    }
+
+
     const playerHistory = new WeakMap();
 
     function anglesTo(P, me) {
@@ -1819,9 +1991,13 @@
                 (me[H.weapon] && (me[H.weapon].isScoped || me[H.weapon].scoped)));
 
             if (!isScoped) {
-                const targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
+                let targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
+                const isZooming = S.sniperZoom && keys.has(S.zoomKey || 'KeyC');
+                if (isZooming) {
+                    targetFov = (S.zoomFov || 25) * DEG;
+                }
                 if (Math.abs(cam.fov - targetFov) > 0.005) {
-                    cam.fov = targetFov;
+                    cam.fov += (targetFov - cam.fov) * 0.35;
                 }
             }
 
@@ -1864,6 +2040,8 @@
 
             checkAutoEscape(me);
             updateEnemyManipulation(me);
+            updateGrenadeTrajectory(me);
+            updateStatsHud(me);
 
             for (const P of ss.PLAYERS) {
                 if (!P || P === me) continue;
@@ -2326,7 +2504,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.0</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.1</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2409,6 +2587,17 @@
             kbBtn.style.flex = '0 0 auto';
             range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
             range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
+            head(pageCombat, 'Sniper Zoom (Binoculars)');
+            check(pageCombat, 'Sniper zoom mode', 'sniperZoom');
+            const zk = row(pageCombat, 'Zoom key');
+            const zkBtn = btn(zk, S.zoomKey || 'KeyC', () => {
+                bindKey(zkBtn, code => {
+                    S.zoomKey = code;
+                    save();
+                }, () => S.zoomKey || 'KeyC');
+            });
+            zkBtn.style.flex = '0 0 auto';
+            range(pageCombat, 'Zoom FOV (deg)', 'zoomFov', 10, 50, 5);
 
             const pageEscape = tabPages.escape;
             check(pageEscape, 'Auto escape', 'autoEscape');
@@ -2470,6 +2659,9 @@
             check(pageVis, 'Dynamic lock color', 'fovDynamicColor');
             color(pageVis, 'Reticle color', 'fovColor');
             range(pageVis, 'Camera FOV (0=def)', 'camFov', 0, 130, 5);
+            head(pageVis, 'Tactical Predictor & HUD');
+            check(pageVis, 'Grenade trajectory arc', 'grenadeTrajectory');
+            check(pageVis, 'On-screen stats HUD', 'statsHud');
 
             const pageMisc = tabPages.misc;
             check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
@@ -2541,5 +2733,5 @@
         else setTimeout(boot, 100);
     };
     boot();
-    log('ST v3.0 loaded');
+    log('ST v3.1 loaded');
 })();

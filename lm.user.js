@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (LM v2.10)
+// @name         Shell Shockers Aimbot + ESP (ST v3.0)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      2.10.0
+// @version      3.0.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern tabbed GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern cyber blue GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -23,8 +23,8 @@
     const log = function (...args) {
         oldConsoleLog.apply(console, [
             "%c%s",
-            `color: white; font-weight: bold; background:rgb(212, 212, 0); padding: 2px 6px; border-radius: 5px; margin-right: 5px;`,
-            `LM`,
+            `color: #ffffff; font-weight: bold; background: linear-gradient(90deg, #0077b6, #00b4d8); padding: 2px 8px; border-radius: 4px; margin-right: 6px;`,
+            `ST`,
             ...args
         ]);
     };
@@ -81,10 +81,17 @@
         activeTab: 'combat'
     };
     const S = Object.assign({}, DEF, (() => {
-        try { return JSON.parse(localStorage.getItem('lm_cfg_v2') || '{}'); } catch (e) { return {}; }
+        try {
+            return JSON.parse(localStorage.getItem('st_cfg_v3') || localStorage.getItem('lm_cfg_v2') || '{}');
+        } catch (e) { return {}; }
     })());
     if (!Array.isArray(S.panelKeys)) S.panelKeys = DEF.panelKeys.slice();
-    const save = () => { try { localStorage.setItem('lm_cfg_v2', JSON.stringify(S)); } catch (e) { } };
+    const save = () => {
+        try {
+            localStorage.setItem('st_cfg_v3', JSON.stringify(S));
+            localStorage.setItem('lm_cfg_v2', JSON.stringify(S));
+        } catch (e) { }
+    };
 
     // ================= INPUT =================
     const keys = new Set();
@@ -566,9 +573,9 @@
 
     let lastSnapshot = null;
 
-    function LM_DUMP(targetPlayer) {
+    function ST_DUMP(targetPlayer) {
         if (targetPlayer && typeof targetPlayer === 'object') {
-            console.group('%c[LM_DUMP] Player Inspection', 'color:#e8c400;font-weight:bold');
+            console.group('%c[ST_DUMP] Player Inspection', 'color:#00e5ff;font-weight:bold');
             const P = targetPlayer;
             const actor = (H.actor && P[H.actor]) ? P[H.actor] : (P.ba || null);
             const mesh = actor ? (actor[H.mesh] || actor.mesh) : null;
@@ -652,7 +659,7 @@
             return;
         }
 
-        console.group('%c[LM_DUMP] Game State Snapshot', 'color:#e8c400;font-weight:bold');
+        console.group('%c[ST_DUMP] Game State Snapshot', 'color:#00e5ff;font-weight:bold');
 
         console.group('ss.MYPLAYER properties');
         if (typeof ss !== 'undefined' && ss.MYPLAYER) {
@@ -718,7 +725,7 @@
             for (const [k, v] of Object.entries(H)) {
                 if (hRegex.test(k)) {
                     matchingH[k] = v;
-                    console.log(`%c${k} %c-> %c${v}`, 'color:#8fd18f', 'color:#aaa', 'color:#e8c400;font-weight:bold');
+                    console.log(`%c${k} %c-> %c${v}`, 'color:#8fd18f', 'color:#aaa', 'color:#00e5ff;font-weight:bold');
                 }
             }
         }
@@ -755,13 +762,13 @@
         };
     }
 
-    function LM_DUMPDIFF() {
+    function ST_DUMPDIFF() {
         if (!lastSnapshot) {
-            console.warn('[LM_DUMPDIFF] No baseline snapshot stored. Running LM_DUMP() first to establish baseline.');
+            console.warn('[ST_DUMPDIFF] No baseline snapshot stored. Running LM_DUMP() first to establish baseline.');
             return LM_DUMP();
         }
 
-        console.group('%c[LM_DUMPDIFF] State Changes Since Last Dump', 'color:#00e5ff;font-weight:bold');
+        console.group('%c[ST_DUMPDIFF] State Changes Since Last Dump', 'color:#00e5ff;font-weight:bold');
         const curPlayer = (typeof ss !== 'undefined' && ss.MYPLAYER) ? getCleanProps(ss.MYPLAYER) : {};
         const weaponObj = (typeof ss !== 'undefined' && ss.MYPLAYER && H.weapon && ss.MYPLAYER[H.weapon] && typeof ss.MYPLAYER[H.weapon] === 'object')
             ? ss.MYPLAYER[H.weapon] : null;
@@ -822,11 +829,15 @@
         return diffs;
     }
 
-    window.LM_DUMP = LM_DUMP;
-    window.LM_DUMPDIFF = LM_DUMPDIFF;
+    window.ST_DUMP = ST_DUMP;
+    window.ST_DUMPDIFF = ST_DUMPDIFF;
+    window.LM_DUMP = ST_DUMP;
+    window.LM_DUMPDIFF = ST_DUMPDIFF;
     try {
-        unsafeWindow.LM_DUMP = LM_DUMP;
-        unsafeWindow.LM_DUMPDIFF = LM_DUMPDIFF;
+        unsafeWindow.ST_DUMP = ST_DUMP;
+        unsafeWindow.ST_DUMPDIFF = ST_DUMPDIFF;
+        unsafeWindow.LM_DUMP = ST_DUMP;
+        unsafeWindow.LM_DUMPDIFF = ST_DUMPDIFF;
     } catch (e) { }
 
     // ================= AMMO & HEALTH RESOLUTION =================
@@ -1107,12 +1118,14 @@
     // ================= BADGE =================
     let badge = null;
     function ensureBadge() {
-        if (badge || document.getElementById('lm-badge')) return;
+        if (badge || document.getElementById('st-badge')) return;
         badge = document.createElement('div');
-        badge.id = 'lm-badge';
-        badge.textContent = 'LM';
-        badge.title = 'LM menu — click to open';
-        badge.style.cssText = 'position:fixed;left:12px;bottom:12px;width:36px;height:36px;border-radius:50%;background:rgba(16,16,16,.92);border:1px solid #e8c400;color:#e8c400;font:bold 12px monospace;display:flex;align-items:center;justify-content:center;z-index:2147483600;cursor:pointer;user-select:none';
+        badge.id = 'st-badge';
+        badge.textContent = 'ST';
+        badge.title = 'ST menu — click to open (~ or Insert)';
+        badge.style.cssText = 'position:fixed;left:12px;bottom:12px;width:38px;height:38px;border-radius:50%;background:rgba(10,18,30,.94);border:1.5px solid #00b4d8;color:#00e5ff;font:bold 13px monospace;display:flex;align-items:center;justify-content:center;z-index:2147483600;cursor:pointer;user-select:none;box-shadow:0 0 12px rgba(0,180,216,0.45);transition:transform .15s ease, box-shadow .15s ease';
+        badge.onmouseenter = () => { badge.style.boxShadow = '0 0 18px rgba(0,229,255,0.85)'; badge.style.transform = 'scale(1.08)'; };
+        badge.onmouseleave = () => { badge.style.boxShadow = '0 0 12px rgba(0,180,216,0.45)'; badge.style.transform = 'scale(1)'; };
 
         let downX = 0, downY = 0, moved = false;
 
@@ -1173,7 +1186,7 @@
             if (!t) {
                 t = document.createElement('div');
                 t.id = 'lm-toast';
-                t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(18,18,22,0.94);color:#e8c400;font:bold 12px monospace;padding:6px 14px;border:1px solid #e8c400;border-radius:6px;z-index:2147483600;box-shadow:0 4px 16px rgba(0,0,0,0.7);pointer-events:none;transition:opacity 0.25s;opacity:0';
+                t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(10,18,30,0.96);color:#00e5ff;font:bold 12px monospace;padding:7px 16px;border:1px solid #00b4d8;border-radius:8px;z-index:2147483600;box-shadow:0 6px 20px rgba(0,180,216,0.35);pointer-events:none;transition:opacity 0.25s;opacity:0';
                 document.body.appendChild(t);
             }
             t.textContent = msg;
@@ -1509,7 +1522,7 @@
                 showToast(`Auto Escape: cover (${bestBlocked}/${enemiesWithin45m.length} LoS blocked)`);
             }
         } catch (err) {
-            console.error('[LM Auto-Escape Error]', err);
+            console.error('[ST Auto-Escape Error]', err);
             escReason = 'error';
             S.autoEscape = false;
             save();
@@ -2167,7 +2180,7 @@
         try {
             const d = row(parent, label);
             const c = document.createElement('input');
-            c.type = 'checkbox'; c.checked = !!S[key]; c.style.cssText = 'accent-color:#e8c400;cursor:pointer';
+            c.type = 'checkbox'; c.checked = !!S[key]; c.style.cssText = 'accent-color:#00b4d8;cursor:pointer';
             c.onchange = () => {
                 try {
                     S[key] = c.checked;
@@ -2183,7 +2196,7 @@
             const d = row(parent, label + ': ' + val);
             const i = document.createElement('input');
             i.type = 'range'; i.min = min; i.max = max; i.step = step; i.value = val;
-            i.style.cssText = 'width:110px;accent-color:#e8c400';
+            i.style.cssText = 'width:110px;accent-color:#00b4d8;cursor:pointer';
             i.oninput = () => {
                 try {
                     const num = +i.value;
@@ -2201,7 +2214,7 @@
         try {
             const d = row(parent, label);
             const s = document.createElement('select');
-            s.style.cssText = 'background:#222;color:#fff;border:1px solid #444;border-radius:3px;font:11px monospace';
+            s.style.cssText = 'background:#132337;color:#e0f2fe;border:1px solid #0284c7;border-radius:4px;font:11px monospace;padding:2px 4px';
             opts.forEach(([v, t]) => {
                 try {
                     const o = document.createElement('option');
@@ -2236,7 +2249,7 @@
         try {
             const h = document.createElement('div');
             h.textContent = text;
-            h.style.cssText = 'color:#e8c400;font-weight:bold;margin:8px 0 3px;border-bottom:1px solid #333;padding-bottom:2px';
+            h.style.cssText = 'color:#00e5ff;font-weight:bold;margin:8px 0 3px;border-bottom:1px solid rgba(0,180,216,0.3);padding-bottom:3px;letter-spacing:0.3px';
             parent.appendChild(h);
         } catch (e) { }
     }
@@ -2244,7 +2257,9 @@
         try {
             const b = document.createElement('button');
             b.textContent = text;
-            b.style.cssText = 'flex:1;background:#333;color:#fff;border:1px solid #555;border-radius:3px;cursor:pointer;font:11px monospace;padding:3px';
+            b.style.cssText = 'flex:1;background:#132337;color:#bae6fd;border:1px solid #0284c7;border-radius:4px;cursor:pointer;font:11px monospace;padding:4px 6px;transition:all .15s ease';
+            b.onmouseenter = () => { b.style.background = '#0284c7'; b.style.color = '#ffffff'; b.style.boxShadow = '0 0 8px rgba(0,180,216,0.4)'; };
+            b.onmouseleave = () => { b.style.background = '#132337'; b.style.color = '#bae6fd'; b.style.boxShadow = 'none'; };
             b.onclick = () => {
                 try { fn(); } catch (e) { }
             };
@@ -2297,8 +2312,8 @@
     function buildPanel() {
         try {
             panel = document.createElement('div');
-            panel.id = 'lm-panel';
-            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:280px;max-height:460px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(18,18,22,.96);color:#ddd;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:8px;z-index:2147483600;box-shadow:0 8px 30px rgba(0,0,0,.8);user-select:none';
+            panel.id = 'st-panel';
+            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:290px;max-height:470px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(10,18,30,.96);color:#e2e8f0;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:9px 12px;border:1.5px solid #00b4d8;border-radius:10px;z-index:2147483600;box-shadow:0 8px 32px rgba(0,0,0,.85), 0 0 16px rgba(0,180,216,0.25);user-select:none';
 
             const stopEv = e => e.stopPropagation();
             stopEv.__lmUI = true;
@@ -2308,10 +2323,10 @@
             panel.addEventListener('wheel', stopEv);
 
             const headBar = document.createElement('div');
-            headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #333';
+            headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.10</span> <span style="color:#888;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.0</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2328,7 +2343,7 @@
             panel.appendChild(headBar);
 
             statusEl = document.createElement('div');
-            statusEl.style.cssText = 'color:#8fd18f;margin-bottom:6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#141416;padding:3px 6px;border-radius:4px;border:1px solid #282828';
+            statusEl.style.cssText = 'color:#38bdf8;margin-bottom:6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#09131f;padding:4px 8px;border-radius:5px;border:1px solid rgba(0,180,216,0.25)';
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
@@ -2355,8 +2370,9 @@
                 tabs.forEach(name => {
                     if (tabPages[name]) tabPages[name].style.display = (name === t) ? 'block' : 'none';
                     if (tabButtons[name]) {
-                        tabButtons[name].style.background = (name === t) ? '#e8c400' : '#282830';
-                        tabButtons[name].style.color = (name === t) ? '#111' : '#bbb';
+                        tabButtons[name].style.background = (name === t) ? 'linear-gradient(135deg, #00b4d8, #0077b6)' : '#101d2d';
+                        tabButtons[name].style.color = (name === t) ? '#ffffff' : '#94a3b8';
+                        tabButtons[name].style.boxShadow = (name === t) ? '0 0 10px rgba(0,180,216,0.5)' : 'none';
                         tabButtons[name].style.fontWeight = (name === t) ? 'bold' : 'normal';
                     }
                 });
@@ -2365,7 +2381,7 @@
             tabs.forEach(t => {
                 const b = document.createElement('button');
                 b.textContent = tabLabels[t];
-                b.style.cssText = 'flex:1;border:none;border-radius:4px;padding:4px 1px;font:10px monospace;cursor:pointer;transition:background .15s';
+                b.style.cssText = 'flex:1;border:none;border-radius:4px;padding:5px 1px;font:10px monospace;cursor:pointer;transition:all .15s ease;background:#101d2d;color:#94a3b8';
                 b.onclick = () => switchTab(t);
                 tabRow.appendChild(b);
                 tabButtons[t] = b;
@@ -2476,7 +2492,7 @@
                 buildPanel();
             });
             btn(aRow, 'Dump State', () => {
-                if (typeof window.LM_DUMP === 'function') window.LM_DUMP();
+                if (typeof window.ST_DUMP === 'function') window.ST_DUMP();
             });
 
             const info = document.createElement('div');
@@ -2525,5 +2541,5 @@
         else setTimeout(boot, 100);
     };
     boot();
-    log('LM v2.10 loaded');
+    log('ST v3.0 loaded');
 })();

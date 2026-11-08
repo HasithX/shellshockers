@@ -1,9 +1,13 @@
-# Shell Shockers Aimbot & ESP (LM v2.10)
+# Shell Shockers Aimbot & ESP (ST v3.0)
 
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
-- **Advanced Shoot Point & Tactical HUD (v2.10 Upgrade):**
+- **Cyber Blue Modern Menu (v3.0 Upgrade):**
+  - Rebranded from legacy LM to **ST v3.0**.
+  - Complete overhaul to a futuristic **Cyber Blue / Azure Neon** glassmorphic interface with vibrant gradients, custom tabs, interactive buttons, and high-visibility status indicators.
+  - Floating circular **ST** quick-access badge with hover animations.
+- **Advanced Shoot Point & Tactical HUD:**
   - `Center Shoot Point Reticle`: High-precision glowing crosshair dot and focus reticle that never disappears or goes missing.
   - `Reticle Styles`: Choose between **Cyber HUD**, **Crosshair**, **Glowing Dot**, or **Circle Reticle**.
   - `Dynamic Tactical Shifting`: Reticle and FOV circle dynamically shift colors in real time:
@@ -37,7 +41,7 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ### 1-Click Install / Update
 If you have **Violentmonkey** or **Tampermonkey** installed, open this link in your browser:
-👉 **[Install LM v2.10](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
+👉 **[Install ST v3.0](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
 
 The extension will pop up with an **Install** or **Update** button. Click it, then refresh Shell Shockers.
 
@@ -48,7 +52,7 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 4. Save and reload `https://shellshock.io/`.
 
 ## 🎮 Controls
-- **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `LM` button)
+- **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `ST` button)
 - **Aim Key:** Hold `Right Mouse Button` (Mouse2)
 - **Save Safe Point:** `G`
 - **Teleport to Nearest Safe Point:** `H`

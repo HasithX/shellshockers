@@ -19,3 +19,4 @@ A userscript for [Shell Shockers](https://shellshock.io/) supporting Violentmonk
 
 ## License
 GPL-3.0
+

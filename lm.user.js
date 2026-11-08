@@ -38,7 +38,7 @@
         targetMode: 'crosshair',
         teamCheck: true,
         autoFire: false,
-        autoFireOnlyAiming: true,
+        autoFireOnlyAiming: false,
         autoFireDelay: 30,
         autoFireFov: 3.5,
         autoFireWhenMenuOpen: false,
@@ -1306,8 +1306,6 @@
                 wantFire = false;
             } else if (!autoFireEnemy) {
                 wantFire = false;
-            } else if (S.autoFireOnlyAiming && !aiming()) {
-                wantFire = false;
             } else if (autoFireEnemy && autoFireEnemy.ang > S.autoFireFov * DEG) {
                 wantFire = false;
             }
@@ -1342,12 +1340,13 @@
                 }
             }
 
-            // Task 3 & 4: Status line shows 'fire ON' only when firing is true, flips to 'fire off' same frame
+            // Status line shows clear state: OFF, READY, LOCKED, or FIRING
             if (statusEl) {
                 const activeTgt = autoFireEnemy || target;
                 const tgtStr = activeTgt ? (activeTgt.ang / DEG).toFixed(1) + '°' : '-';
+                const fireState = !S.autoFire ? 'OFF' : (firing ? 'FIRING' : (autoFireEnemy ? 'LOCKED' : 'READY'));
                 statusEl.textContent =
-                    `tgt ${tgtStr} | fire ${firing ? 'ON' : 'off'} | ${ammoStatusStr} | ${healthStatusStr}`;
+                    `tgt ${tgtStr} | fire ${fireState} | ${ammoStatusStr} | ${healthStatusStr}`;
             }
 
             // Task 4: Dispose dead and teammate players
@@ -1526,7 +1525,7 @@
             if (name === 'legit') {
                 Object.assign(S, {
                     aimMode: 'hold', aimFov: 25, smooth: 2.5, targetMode: 'crosshair',
-                    autoFire: false, autoFireOnlyAiming: true, autoFireFov: 2, autoFireDelay: 50,
+                    autoFire: false, autoFireOnlyAiming: false, autoFireFov: 2, autoFireDelay: 50,
                     espBox: true, espTracer: false, espHealth: false, espDistance: false,
                     hideOwnBody: true, hideOwnGun: false, highlightClosest: true
                 });
@@ -1566,11 +1565,9 @@
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
-            // 1. Auto fire (checkbox)
+            // 1. Auto fire (checkbox - triggers automatically when target is in FOV cone)
             check(panel, 'Auto fire', 'autoFire');
-            // 2. Only while aiming (checkbox)
-            check(panel, 'Only while aiming', 'autoFireOnlyAiming');
-            // 2b. Fire when menu open (checkbox)
+            // 2. Fire when menu open (checkbox)
             check(panel, 'Fire when menu open', 'autoFireWhenMenuOpen');
             // 3. Fire FOV slider (0.5–15)
             range(panel, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);

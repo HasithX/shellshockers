@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (LM v2.6)
+// @name         Shell Shockers Aimbot + ESP (LM v2.7)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      2.6.0
+// @version      2.7.0
 // @author       hasithx
 // @description  ESP, tracers, auto-fire, FOV aimbot, self-hide, closest highlight, infinite ammo, modern tabbed GUI
 // @match        https://shellshock.io/*
@@ -44,6 +44,9 @@
         autoFireDelay: 30,
         autoFireFov: 3.5,
         autoFireWhenMenuOpen: false,
+        prediction: true,
+        aimHeight: 0.35,
+        autoJump: false,
         espBox: true,
         espTracer: true,
         espName: true,
@@ -424,6 +427,8 @@
             d = Math.min(d, fc - d);
             return ((a1 - a2 + fc) % fc > Math.PI) ? -d : d;
         },
+        accX: 0,
+        accY: 0,
         setToYawPitch: (yaw = 0, pitch = 0) => {
             if (!ss.MYPLAYER) return;
             const curYaw = ss.MYPLAYER[H.yaw] || 0;
@@ -433,12 +438,21 @@
             const mx = yd / yawpitch.magicValue;
             const my = pd / yawpitch.magicValue;
 
+            yawpitch.accX += mx;
+            yawpitch.accY += my;
+            let moveX = Math.round(yawpitch.accX);
+            let moveY = Math.round(yawpitch.accY);
+            if (moveX !== 0) yawpitch.accX -= moveX;
+            if (moveY !== 0) yawpitch.accY -= moveY;
+            if (moveX === 0 && Math.abs(mx) > 0.05) moveX = mx > 0 ? 1 : -1;
+            if (moveY === 0 && Math.abs(my) > 0.05) moveY = my > 0 ? 1 : -1;
+
             // (a) captured `real` pointermove listener
             if (yawpitch.realListener) {
                 try {
                     const ev = makeFakeEvent('pointermove', false, {
-                        movementX: Math.ceil(mx),
-                        movementY: Math.ceil(my),
+                        movementX: moveX,
+                        movementY: moveY,
                         x: 1,
                         isTrusted: true
                     });
@@ -453,8 +467,8 @@
                 try {
                     yawpitch.setMouseParams();
                     const ev = makeFakeEvent('pointermove', false, {
-                        movementX: Math.ceil(mx),
-                        movementY: Math.ceil(my),
+                        movementX: moveX,
+                        movementY: moveY,
                         x: 1,
                         isTrusted: true
                     });
@@ -1004,10 +1018,37 @@
         return P[tracersKey];
     }
 
+    const playerHistory = new WeakMap();
+
     function anglesTo(P, me) {
-        const dx = -(P[H.x] - me[H.x]);
-        const dy = -(P[H.y] - me[H.y] - 0.05);
-        const dz = -(P[H.z] - me[H.z]);
+        let predX = P[H.x];
+        let predY = P[H.y];
+        let predZ = P[H.z];
+
+        const nowMs = performance.now();
+        const prev = playerHistory.get(P);
+        if (prev && prev.time) {
+            const dt = Math.max(0.001, (nowMs - prev.time) / 1000);
+            if (dt < 0.25) {
+                const vx = (P[H.x] - prev.x) / dt;
+                const vy = (P[H.y] - prev.y) / dt;
+                const vz = (P[H.z] - prev.z) / dt;
+
+                if (S.prediction) {
+                    const dist = Math.hypot(P[H.x] - me[H.x], P[H.y] - me[H.y], P[H.z] - me[H.z]);
+                    const leadTime = Math.min(0.12, Math.max(0.025, (dist / 175) + 0.035));
+                    predX += vx * leadTime;
+                    predY += vy * leadTime;
+                    predZ += vz * leadTime;
+                }
+            }
+        }
+        playerHistory.set(P, { x: P[H.x], y: P[H.y], z: P[H.z], time: nowMs });
+
+        const aimH = (typeof S.aimHeight === 'number') ? S.aimHeight : 0.35;
+        const dx = -(predX - me[H.x]);
+        const dy = -((predY + aimH) - (me[H.y] + 0.4));
+        const dz = -(predZ - me[H.z]);
         const v = { [H.x]: dx, [H.y]: dy, [H.z]: dz };
         const yaw = F.calculateYaw(v), pitch = F.calculatePitch(v);
         return {
@@ -1066,6 +1107,7 @@
     let frameErrorLogged = false;
     let cachedActorPlayer = null;
     let origCamFov = null;
+    let lastTargetPlayer = null;
 
     // Tasks 1, 4, 6, 7: LIBERTYMUTUAL frame callback
     createAnonFunction("LIBERTYMUTUAL", function () {
@@ -1090,6 +1132,17 @@
 
             applySelfVisibility(me);
             applyAmmoAndHealth(me);
+
+            // Auto-Jump / Bunny-Hop
+            if (S.autoJump && me) {
+                try {
+                    if (typeof me.canJump === 'function' && me.canJump()) {
+                        if (typeof me.jump === 'function') me.jump();
+                    } else if (typeof me.onGround === 'number' && me.onGround > 0 && typeof me.jump === 'function') {
+                        me.jump();
+                    }
+                } catch (e) { }
+            }
 
             // Phase 2: Re-assert shooting state while firing; force released state for at least 3 frames after release
             const sk = getShootingKey(me);
@@ -1276,7 +1329,8 @@
                         }
                         // Aimbot target check
                         if (a.ang <= fovRad && pDist >= 0.5) {
-                            const score = S.targetMode === 'nearest' ? pDist : a.ang;
+                            let score = S.targetMode === 'nearest' ? pDist : a.ang;
+                            if (P === lastTargetPlayer) score *= 0.75; // Stick to currently locked target
                             if (score < best) { best = score; target = { P, ...a, dist: pDist }; }
                         }
                     }
@@ -1297,7 +1351,12 @@
                 }
             }
 
-            if (aiming() && target) yawpitch.setToYawPitch(target.yaw, target.pitch);
+            if (aiming() && target) {
+                yawpitch.setToYawPitch(target.yaw, target.pitch);
+                lastTargetPlayer = target.P;
+            } else {
+                lastTargetPlayer = null;
+            }
 
             // Phase 2: Strict auto-fire gating in exact veto order
             let wantFire = true;
@@ -1529,6 +1588,7 @@
                 Object.assign(S, {
                     aimMode: 'hold', aimFov: 25, smooth: 2.5, targetMode: 'crosshair',
                     autoFire: false, autoFireOnlyAiming: false, autoFireFov: 2, autoFireDelay: 50,
+                    prediction: true, aimHeight: 0.35, autoJump: false,
                     espBox: true, espTracer: false, espName: true, espHealth: false, espDistance: false,
                     hideOwnBody: true, hideOwnGun: false, highlightClosest: true, fovCircle: true, camFov: 0
                 });
@@ -1536,6 +1596,7 @@
                 Object.assign(S, {
                     aimMode: 'hold', aimFov: 70, smooth: 0.35, targetMode: 'crosshair',
                     autoFire: true, autoFireOnlyAiming: false, autoFireFov: 4, autoFireDelay: 50,
+                    prediction: true, aimHeight: 0.40, autoJump: true,
                     espBox: true, espTracer: true, espName: true, espHealth: true, espDistance: true,
                     hideOwnBody: true, hideOwnGun: true, highlightClosest: true, fovCircle: true, camFov: 90
                 });
@@ -1544,7 +1605,7 @@
         } catch (e) { }
     }
 
-    // Modern Tabbed Menu GUI (v2.6 by hasithx)
+    // Modern Tabbed Menu GUI (v2.7 by hasithx)
     function buildPanel() {
         try {
             panel = document.createElement('div');
@@ -1563,7 +1624,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #333';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.6</span> <span style="color:#888;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.7</span> <span style="color:#888;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -1633,6 +1694,8 @@
             // ====== TAB 1: COMBAT ======
             const pageCombat = tabPages.combat;
             check(pageCombat, 'Auto fire', 'autoFire');
+            check(pageCombat, 'Lead prediction', 'prediction');
+            range(pageCombat, 'Aim height', 'aimHeight', 0.1, 0.55, 0.05);
             range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
             range(pageCombat, 'Fire delay (ms)', 'autoFireDelay', 0, 300, 5);
             check(pageCombat, 'Fire in menu', 'autoFireWhenMenuOpen');
@@ -1660,6 +1723,7 @@
 
             // ====== TAB 3: MISC ======
             const pageMisc = tabPages.misc;
+            check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
             check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
             range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
             check(pageMisc, 'Hold max health', 'holdHealth');

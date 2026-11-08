@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (LM v2.8)
+// @name         Shell Shockers Aimbot + ESP (LM v2.9)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      2.8.0
+// @version      2.9.0
 // @author       hasithx
 // @description  ESP, tracers, auto-fire, FOV aimbot, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern tabbed GUI
 // @match        https://shellshock.io/*
@@ -50,6 +50,7 @@
         autoEscape: false,
         escapeHp: 35,
         escapeRadius: 7,
+        teleportMs: 800,
         savePointKey: 'KeyG',
         gotoPointKey: 'KeyH',
         prediction: true,
@@ -112,7 +113,6 @@
             return;
         }
         if (isTyping()) return;
-        // Phase 1: Manual save and goto safe points
         if (e.code === (S.savePointKey || 'KeyG')) {
             saveCurrentPoint();
             return;
@@ -167,7 +167,6 @@
         });
     }
 
-    // Phase 2: getShootingKey resolving to verified runtime triggerPulled property
     let resolvedShootingKey = null;
     function getShootingKey(me) {
         if (resolvedShootingKey) return resolvedShootingKey;
@@ -235,7 +234,6 @@
         return false;
     }
 
-    // Phase 2: fireEvent with call-time filtering, shot logging, and releaseTrigger() support
     function fireEvent(down) {
         try {
             if (down) {
@@ -252,9 +250,7 @@
                     }
                     if ('shooting' in me) me.shooting = true;
                 }
-                // 2) Dispatch real PointerEvent and MouseEvent on canvas
                 dispatchCanvasPointer(true);
-                // 3) Call captured pointerdown/mousedown listeners (filtered at call time)
                 let called = 0, thrown = 0;
                 if (fireDown.length) {
                     const seen = new Set();
@@ -272,8 +268,6 @@
                 }
                 log(`[AUTO-FIRE] Shot attempt: called=${called}, threw=${thrown}, fieldChanged=${fieldChanged}`);
             } else {
-                // On release:
-                // 1) Call captured pointerup/mouseup listeners (filtered at call time)
                 if (fireUp.length) {
                     const seen = new Set();
                     for (const { target, fn, type } of fireUp) {
@@ -285,9 +279,7 @@
                         } catch (e) { }
                     }
                 }
-                // 2) Dispatch real PointerEvent and MouseEvent on canvas
                 dispatchCanvasPointer(false);
-                // 3) Set shooting field to false and call releaseTrigger()
                 if (typeof ss !== 'undefined' && ss.MYPLAYER) {
                     const me = ss.MYPLAYER;
                     const sk = getShootingKey(me);
@@ -344,7 +336,6 @@
         return false;
     }
 
-    // Task 6: While the panel is open, patch HTMLCanvasElement.prototype.requestPointerLock to return early, and restore it on close
     let origCanvasRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
 
     function hookPointerLock() {
@@ -364,7 +355,6 @@
         }
     }
 
-    // Phase 2: Unconditional capture for document, window, canvas, body, #game (filtered at call time)
     const originalAddEventListener = EventTarget.prototype.addEventListener;
     EventTarget.prototype.addEventListener = function (type, listener, options) {
         try {
@@ -464,7 +454,6 @@
             if (moveX === 0 && Math.abs(mx) > 0.05) moveX = mx > 0 ? 1 : -1;
             if (moveY === 0 && Math.abs(my) > 0.05) moveY = my > 0 ? 1 : -1;
 
-            // (a) captured `real` pointermove listener
             if (yawpitch.realListener) {
                 try {
                     const ev = makeFakeEvent('pointermove', false, {
@@ -479,7 +468,6 @@
                 } catch (e) { }
             }
 
-            // (b) unsafeWindow.set_mouse_params + the listener
             if (yawpitch.listener) {
                 try {
                     yawpitch.setMouseParams();
@@ -495,7 +483,6 @@
                 } catch (e) { }
             }
 
-            // (c) direct assignment ss.MYPLAYER[H.yaw] = yaw; ss.MYPLAYER[H.pitch] = pitch
             try {
                 if (H.yaw) ss.MYPLAYER[H.yaw] = yaw;
                 if (H.pitch) ss.MYPLAYER[H.pitch] = pitch;
@@ -576,7 +563,6 @@
     let lastSnapshot = null;
 
     function LM_DUMP(targetPlayer) {
-        // Phase 0: Extend LM_DUMP to take a player argument
         if (targetPlayer && typeof targetPlayer === 'object') {
             console.group('%c[LM_DUMP] Player Inspection', 'color:#e8c400;font-weight:bold');
             const P = targetPlayer;
@@ -585,8 +571,8 @@
             const meshPos = mesh && mesh.position ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null;
 
             console.log('Player Mesh Position:', meshPos);
+            console.log('P[H.coords]:', H.coords ? P[H.coords] : '(no H.coords)');
 
-            // 1. Every numeric property between -2000 and 2000 with its value on P
             console.group('P numeric properties (-2000 to 2000)');
             const pNums = {};
             for (const k of Object.keys(P)) {
@@ -600,7 +586,6 @@
             console.table(Object.entries(pNums).map(([key, value]) => ({ key, value })));
             console.groupEnd();
 
-            // 2. The same for P[H.actor]
             if (actor) {
                 console.group('P[H.actor] numeric properties (-2000 to 2000)');
                 const aNums = {};
@@ -616,7 +601,6 @@
                 console.groupEnd();
             }
 
-            // 3. The same for P[H.actor][H.mesh]
             if (mesh) {
                 console.group('Mesh numeric properties');
                 const mNums = {};
@@ -632,7 +616,6 @@
                 console.groupEnd();
             }
 
-            // 4. Interpolation target, previous position, or velocity detection
             console.group('Interpolation & Position Candidates');
             if (meshPos) {
                 const candidates = [];
@@ -667,7 +650,6 @@
 
         console.group('%c[LM_DUMP] Game State Snapshot', 'color:#e8c400;font-weight:bold');
 
-        // 1. ss.MYPLAYER properties (Phase 0: numeric properties between -2000 and 2000, booleans, mesh position)
         console.group('ss.MYPLAYER properties');
         if (typeof ss !== 'undefined' && ss.MYPLAYER) {
             const me = ss.MYPLAYER;
@@ -675,6 +657,7 @@
             const mesh = actor ? (actor[H.mesh] || actor.mesh) : null;
             const meshPos = mesh && mesh.position ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null;
             console.log('ss.MYPLAYER Mesh Position:', meshPos);
+            console.log('ss.MYPLAYER[H.coords]:', H.coords ? me[H.coords] : '(no H.coords)');
 
             const filteredProps = {};
             for (const k of Object.keys(me)) {
@@ -695,7 +678,6 @@
         }
         console.groupEnd();
 
-        // 2. ss.MYPLAYER[H.weapon] properties
         console.group('ss.MYPLAYER[H.weapon] properties');
         const weaponObj = (typeof ss !== 'undefined' && ss.MYPLAYER && H.weapon && ss.MYPLAYER[H.weapon] && typeof ss.MYPLAYER[H.weapon] === 'object')
             ? ss.MYPLAYER[H.weapon] : null;
@@ -709,7 +691,6 @@
         }
         console.groupEnd();
 
-        // 2b. ss.MYPLAYER[H.weapon].ammo properties
         const ammoObj = (weaponObj && weaponObj.ammo && typeof weaponObj.ammo === 'object')
             ? weaponObj.ammo
             : (typeof ss !== 'undefined' && ss.MYPLAYER && ss.MYPLAYER.weapons && ss.MYPLAYER.weapons[0] && ss.MYPLAYER.weapons[0].ammo
@@ -726,7 +707,6 @@
         }
         console.groupEnd();
 
-        // 3. H map entries matching target keywords
         console.group(`H Map Entries (Total keys: ${Object.keys(H || {}).length})`);
         const hRegex = /ammo|clip|mag|bullet|round|reserve|health|hp|life|reload|shoot|fire|weapon|scoped/i;
         const matchingH = {};
@@ -740,7 +720,6 @@
         }
         console.groupEnd();
 
-        // 4. fireDown and fireUp listeners
         console.group(`Captured Listeners (fireDown: ${fireDown.length}, fireUp: ${fireUp.length})`);
         console.log('fireDown:', fireDown.map(e => ({
             target: (e.target && (e.target.nodeName || e.target.tagName)) || (e.target === window ? 'window' : (e.target === document ? 'document' : String(e.target))),
@@ -756,7 +735,6 @@
 
         console.groupEnd();
 
-        // Update baseline snapshot for LM_DUMPDIFF
         lastSnapshot = {
             player: (typeof ss !== 'undefined' && ss.MYPLAYER) ? getCleanProps(ss.MYPLAYER) : {},
             weapon: weaponObj ? getCleanProps(weaponObj) : {},
@@ -793,7 +771,6 @@
 
         const diffs = [];
 
-        // Diff player
         const allPlayerKeys = new Set([...Object.keys(lastSnapshot.player || {}), ...Object.keys(curPlayer)]);
         for (const k of allPlayerKeys) {
             const oldV = (lastSnapshot.player || {})[k];
@@ -806,7 +783,6 @@
             }
         }
 
-        // Diff weapon
         const allWeaponKeys = new Set([...Object.keys(lastSnapshot.weapon || {}), ...Object.keys(curWeapon)]);
         for (const k of allWeaponKeys) {
             const oldV = (lastSnapshot.weapon || {})[k];
@@ -819,7 +795,6 @@
             }
         }
 
-        // Diff ammo
         const allAmmoKeys = new Set([...Object.keys(lastSnapshot.ammo || {}), ...Object.keys(curAmmo)]);
         for (const k of allAmmoKeys) {
             const oldV = (lastSnapshot.ammo || {})[k];
@@ -839,9 +814,7 @@
         }
         console.groupEnd();
 
-        // Update snapshot to current state
         lastSnapshot = { player: curPlayer, weapon: curWeapon, ammo: curAmmo };
-        return diffs;
         return diffs;
     }
 
@@ -852,7 +825,7 @@
         unsafeWindow.LM_DUMPDIFF = LM_DUMPDIFF;
     } catch (e) { }
 
-    // ================= AMMO & HEALTH RESOLUTION (Tasks 4 & 5) =================
+    // ================= AMMO & HEALTH RESOLUTION =================
     let resolvedAmmoTarget = null;
     let resolvedAmmoKey = null;
     let resolvedReserveTarget = null;
@@ -887,7 +860,6 @@
                 }
             }
         } catch (e) { }
-        // Proven runtime keys from live build inspection
         if (!H.hp) H.hp = 'kb';
         if (!H.rounds) H.rounds = 'fa';
         if (!H.storeMax) H.storeMax = 'Ua';
@@ -900,7 +872,6 @@
         if (!H.triggerPulled) H.triggerPulled = 'triggerPulled';
     }
 
-    // Phase 3 & 4: Resolve Ammo and Health using proven runtime object paths
     function resolveAmmoAndHealth(me) {
         if (!me) return;
         ensureAllKeys();
@@ -917,7 +888,6 @@
                 ? me.weapons[0].ammo
                 : null);
 
-        // Resolve Magazine Ammo (fa)
         resolvedAmmoTarget = null;
         resolvedAmmoKey = null;
         if (ammoObj && typeof ammoObj.fa === 'number') {
@@ -931,7 +901,6 @@
             resolvedAmmoKey = 'fa';
         }
 
-        // Resolve Reserve Ammo (store)
         resolvedReserveTarget = null;
         resolvedReserveKey = null;
         if (ammoObj && typeof ammoObj.store === 'number') {
@@ -942,7 +911,6 @@
             resolvedReserveKey = 'Ua';
         }
 
-        // Resolve Health: kb on MYPLAYER
         resolvedHealthTarget = null;
         resolvedHealthKey = null;
         if (typeof me.kb === 'number') {
@@ -953,12 +921,10 @@
             resolvedHealthKey = H.hp;
         }
 
-        // Resolve Reload
         resolvedReloadTarget = me;
         resolvedReloadKey = 'reloading';
     }
 
-    // Phase 3 & 4: Apply infinite ammo, hold health, and format live status
     function applyAmmoAndHealth(me) {
         if (!me) return;
 
@@ -981,7 +947,6 @@
             resolveAmmoAndHealth(me);
         }
 
-        // Phase 3: Infinite ammo
         if (S.infiniteAmmo) {
             const val = typeof S.ammoValue === 'number' ? S.ammoValue : 999;
             if (ammoObj) {
@@ -1012,13 +977,11 @@
             } catch (e) { }
         }
 
-        // Phase 4: Hold max health (100)
         if (S.holdHealth) {
             me.kb = 100;
             if (H.hp && H.hp in me) me[H.hp] = 100;
         }
 
-        // Live ammo status line
         if (ammoObj && typeof ammoObj.fa === 'number') {
             const resStr = typeof ammoObj.store === 'number' ? `+${ammoObj.store}` : '';
             ammoStatusStr = `ammo fa:${ammoObj.fa}${resStr}`;
@@ -1030,7 +993,6 @@
             ammoStatusStr = 'ammo ?';
         }
 
-        // Live health status line
         const curHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : null);
         if (curHp !== null) {
             healthStatusStr = `hp kb:${Math.round(curHp)}`;
@@ -1140,7 +1102,7 @@
         return P[tracersKey];
     }
 
-    // ================= TOAST NOTIFICATION (Phase 1) =================
+    // ================= TOAST NOTIFICATION =================
     let toastTimeout = null;
     function showToast(msg) {
         try {
@@ -1160,7 +1122,7 @@
         } catch (e) { }
     }
 
-    // ================= MANUAL SAFE POINTS (Phase 1) =================
+    // ================= MANUAL SAFE POINTS =================
     function getSavedPoints() {
         try {
             return JSON.parse(localStorage.getItem('lm_points_v1') || '[]');
@@ -1193,16 +1155,87 @@
         }
     }
 
-    let teleportFramesRemaining = 0;
+    // ================= TELEPORT (sustained write, all mirrors) =================
+    let tpTarget = null;
+    let tpUntil = 0;
+    let tpStartDist = Infinity;
+    let tpLogged = false;
     let teleportTargetPos = null;
     let teleportDriveUntil = 0;
 
+    function getCoordsRef(me) {
+        if (!me) return null;
+        let c = (H.coords && me[H.coords]) ? me[H.coords] : (me.coords || null);
+        if (!c) {
+            for (const k of ['coords', 'pos', 'position', 'origin']) {
+                if (me[k]) { c = me[k]; break; }
+            }
+        }
+        if (!c) return null;
+        if (Array.isArray(c)) return { kind: 'array', ref: c };
+        if (typeof c === 'object' && typeof c.x === 'number') return { kind: 'obj', ref: c };
+        return null;
+    }
+
+    // Writes every known position mirror at once so nothing fights the others
+    function writePos(me, x, y, z) {
+        try {
+            if (H.x) me[H.x] = x;
+            if (H.y) me[H.y] = y;
+            if (H.z) me[H.z] = z;
+
+            const c = getCoordsRef(me);
+            if (c) {
+                if (c.kind === 'array') { c.ref[0] = x; c.ref[1] = y; c.ref[2] = z; }
+                else { c.ref.x = x; c.ref.y = y; c.ref.z = z; }
+            }
+
+            const actor = (H.actor && me[H.actor]) ? me[H.actor] : (me.ba || null);
+            if (actor) {
+                const m = actor[H.mesh] || actor.mesh;
+                if (m && m.position) {
+                    m.position.x = x; m.position.y = y; m.position.z = z;
+                }
+                if (actor.lerpTargetPosition && actor.lerpTargetPosition.copyFromFloats) {
+                    actor.lerpTargetPosition.copyFromFloats(x, y, z);
+                }
+                if (actor.lerpToPosition && actor.lerpToPosition.copyFromFloats) {
+                    actor.lerpToPosition.copyFromFloats(x, y, z);
+                }
+            }
+        } catch (e) { }
+    }
+
     function startTeleport(x, y, z) {
+        const me = ss.MYPLAYER;
+        if (!me) return;
+        tpTarget = { x, y, z };
         teleportTargetPos = { x, y, z };
-        teleportFramesRemaining = 3;
-        teleportDriveUntil = Date.now() + 400;
-        // Phase 2: Reset aimbot target cache after teleport
+        teleportDriveUntil = Date.now() + (S.teleportMs || 800);
+        tpUntil = Date.now() + (S.teleportMs || 800);
+        tpStartDist = Math.hypot(x - me[H.x], y - me[H.y], z - me[H.z]);
+        tpLogged = false;
         lastTargetPlayer = null;
+    }
+
+    function applyTeleport(me) {
+        if (!tpTarget) return;
+        const now = Date.now();
+        if (now > tpUntil) {
+            const d = Math.hypot(tpTarget.x - me[H.x], tpTarget.y - me[H.y], tpTarget.z - me[H.z]);
+            log(`teleport finished: moved ${(tpStartDist - d).toFixed(1)}m of ${tpStartDist.toFixed(1)}m`);
+            tpTarget = null;
+            return;
+        }
+        writePos(me, tpTarget.x, tpTarget.y, tpTarget.z);
+
+        if (!tpLogged && now > tpUntil - (S.teleportMs || 800) + 250) {
+            tpLogged = true;
+            const d = Math.hypot(tpTarget.x - me[H.x], tpTarget.y - me[H.y], tpTarget.z - me[H.z]);
+            if (d > tpStartDist - 0.5) {
+                log('teleport: NO EFFECT — position write is being overwritten');
+            }
+        }
     }
 
     function gotoNearestPoint() {
@@ -1220,12 +1253,16 @@
             let nearest = null;
             let nearestDist = Infinity;
             let nearestIdx = -1;
-            pts.forEach((pt, i) => {
+            // Prefer points further than 1.5m so we do not teleport to where we are already standing
+            let candidatePts = pts.filter(pt => Math.hypot(pt.x - me[H.x], pt.y - me[H.y], pt.z - me[H.z]) > 1.5);
+            if (candidatePts.length === 0) candidatePts = pts;
+            candidatePts.forEach((pt) => {
+                const idx = pts.indexOf(pt);
                 const dist = Math.hypot(pt.x - me[H.x], pt.y - me[H.y], pt.z - me[H.z]);
                 if (dist < nearestDist) {
                     nearestDist = dist;
                     nearest = pt;
-                    nearestIdx = i + 1;
+                    nearestIdx = idx + 1;
                 }
             });
             if (nearest) {
@@ -1237,36 +1274,41 @@
         }
     }
 
-    // ================= AUTO COVER SEARCH & ESCAPE (Phases 2 & 3) =================
+    // ================= AUTO COVER SEARCH & ESCAPE =================
     let lastEscapeTime = 0;
     let escapeTriggeredHp = 0;
     let waitingForHpRecovery = false;
     let lastEscapeSpot = null;
+    let escReason = '-';
 
     function checkAutoEscape(me) {
-        if (!S.autoEscape || !me || !ss.SCENE) return;
+        if (!S.autoEscape || !me || !ss.SCENE) { escReason = 'off'; return; }
+        escReason = '-';
 
         const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
         const escapeThreshold = S.escapeHp || 35;
 
-        // Recovery hysteresis: no escape while below threshold after an escape until HP recovers above threshold + 10
         if (waitingForHpRecovery) {
             if (myHp >= escapeTriggeredHp + 10) {
                 waitingForHpRecovery = false;
             } else {
+                escReason = 'recover';
                 return;
             }
         }
 
-        if (myHp > escapeThreshold) return;
+        if (myHp > escapeThreshold) { escReason = 'hp ok'; return; }
 
         const now = Date.now();
-        if (now - lastEscapeTime < 3000) return; // 3-second cooldown
+        if (now - lastEscapeTime < 3000) { escReason = 'cooldown'; return; }
 
-        // Never escape while airborne if onGround flag resolves
-        if (typeof me.onGround === 'number' && me.onGround <= 0) return;
+        // Never escape while airborne (number OR boolean flag)
+        let grounded = true;
+        if (typeof me.onGround === 'number') grounded = me.onGround > 0;
+        else if (typeof me.onGround === 'boolean') grounded = me.onGround;
+        else if (H.onGround && typeof me[H.onGround] === 'number') grounded = me[H.onGround] > 0;
+        if (!grounded) { escReason = 'airborne'; return; }
 
-        // Check if at least one enemy is within 45m (cap at 8 enemies to bound cost)
         const enemiesWithin45m = [];
         for (const P of ss.PLAYERS) {
             if (!P || P === me || !P[H.playing]) continue;
@@ -1281,10 +1323,9 @@
             }
         }
 
-        if (enemiesWithin45m.length === 0) return;
+        if (enemiesWithin45m.length === 0) { escReason = 'no enemy'; return; }
 
         try {
-            // Predicate ignoring all player meshes and our ESP lines
             const ignoredMeshes = new Set();
             for (const P of ss.PLAYERS) {
                 if (!P) continue;
@@ -1301,10 +1342,21 @@
                 } catch (e) { }
             }
 
+            const isEspMesh = mesh => !!(mesh.name && (mesh.name.includes('esp') || mesh.name.includes('box') || mesh.name.includes('tracer')));
+
+            // LoS predicate: only meshes that can block
             const predicate = mesh => {
-                if (!mesh || !mesh.isPickable) return false;
+                if (!mesh) return false;
                 if (ignoredMeshes.has(mesh)) return false;
-                if (mesh.name && (mesh.name.includes('esp') || mesh.name.includes('box') || mesh.name.includes('tracer'))) return false;
+                if (isEspMesh(mesh)) return false;
+                return true;
+            };
+
+            // Floor predicate: no isPickable requirement
+            const floorPredicate = mesh => {
+                if (!mesh) return false;
+                if (ignoredMeshes.has(mesh)) return false;
+                if (isEspMesh(mesh)) return false;
                 return true;
             };
 
@@ -1313,31 +1365,32 @@
             const myY = me[H.y];
             const myZ = me[H.z];
 
-            // 1. Build 12 candidate points on a ring around player
             const survivingCandidates = [];
             const downDir = new BABYLON.Vector3(0, -1, 0);
+            let rawFloorHits = 0;
 
             for (let i = 0; i < 12; i++) {
                 const angle = (i / 12) * Math.PI * 2;
                 const candX = myX + Math.cos(angle) * radius;
                 const candZ = myZ + Math.sin(angle) * radius;
 
-                // 2. Raycast downward from 2m above to find floor
                 const downOrigin = new BABYLON.Vector3(candX, myY + 2.0, candZ);
-                const downRay = new BABYLON.Ray(downOrigin, downDir, 5.0);
-                const floorHit = ss.SCENE.pickWithRay(downRay, predicate);
+                const downRay = new BABYLON.Ray(downOrigin, downDir, 8.0);
+                const floorHit = ss.SCENE.pickWithRay(downRay, floorPredicate);
+                if (floorHit && floorHit.hit) rawFloorHits++;
 
                 if (!floorHit || !floorHit.hit || !floorHit.pickedPoint) continue;
-                // Discard if hit is further than 3m below
-                if (floorHit.distance > 5.0) continue;
+                if (floorHit.distance > 6.0) continue;
 
                 const candY = floorHit.pickedPoint.y;
                 survivingCandidates.push({ x: candX, y: candY, z: candZ });
             }
 
-            if (survivingCandidates.length === 0) return;
+            if (survivingCandidates.length === 0) {
+                escReason = `no floor (${rawFloorHits} hits)`;
+                return;
+            }
 
-            // 3. Score candidates by blocked line of sight to enemies
             let bestCand = null;
             let bestBlocked = -1;
             let bestDist = Infinity;
@@ -1345,7 +1398,6 @@
             let maxDist = -1;
 
             for (const cand of survivingCandidates) {
-                // Avoid jumping into same spot twice in a row
                 if (lastEscapeSpot && Math.hypot(cand.x - lastEscapeSpot.x, cand.z - lastEscapeSpot.z) < 1.5) {
                     continue;
                 }
@@ -1371,7 +1423,6 @@
                     maxDistCandidate = cand;
                 }
 
-                // 4. Score: number of blocked enemy lines of sight, then distance from player
                 if (blockedCount > bestBlocked) {
                     bestBlocked = blockedCount;
                     bestDist = distFromPlayer;
@@ -1382,7 +1433,6 @@
                 }
             }
 
-            // 5. If best candidate blocks zero lines, take farthest one
             const targetSpot = (bestBlocked > 0 && bestCand) ? bestCand : (maxDistCandidate || survivingCandidates[0]);
 
             if (targetSpot) {
@@ -1390,19 +1440,21 @@
                 lastEscapeTime = now;
                 escapeTriggeredHp = myHp;
                 waitingForHpRecovery = true;
+                escReason = `ok ${bestBlocked}/${enemiesWithin45m.length}`;
 
                 startTeleport(targetSpot.x, targetSpot.y, targetSpot.z);
-                showToast(`Auto Escape: Cover reached (${bestBlocked}/${enemiesWithin45m.length} LoS blocked)`);
+                showToast(`Auto Escape: cover (${bestBlocked}/${enemiesWithin45m.length} LoS blocked)`);
             }
         } catch (err) {
             console.error('[LM Auto-Escape Error]', err);
+            escReason = 'error';
             S.autoEscape = false;
             save();
             showToast('Auto-escape error - disabled');
         }
     }
 
-    // ================= ENEMY POSITION MANIPULATION (Phases 1, 2, 5) =================
+    // ================= ENEMY POSITION MANIPULATION =================
     const enemySnapshots = new Map();
     let lastFreezeState = false;
     const failedFreezePlayers = new WeakSet();
@@ -1429,7 +1481,6 @@
 
             lastFreezeState = true;
 
-            // Phase 5 Safety: Never touch ss.MYPLAYER; skip inactive/dead players; clear snapshots on death
             for (const [P] of enemySnapshots) {
                 const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : 100);
                 if (!P[H.playing] || pHp <= 0 || !ss.PLAYERS.includes(P)) {
@@ -1445,17 +1496,13 @@
                 const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : 100);
                 if (!P[H.playing] || pHp <= 0) continue;
 
-                // Cache real server position prior to overwrite
                 if (!P._serverPos) {
                     P._serverPos = { x: P[H.x], y: P[H.y], z: P[H.z] };
-                } else if (!S.freezeEnemies) {
-                    P._serverPos.x = P[H.x]; P._serverPos.y = P[H.y]; P._serverPos.z = P[H.z];
                 }
                 activeEnemies.push(P);
             }
 
             if (S.freezeMode === 'pull') {
-                // Phase 2: Pull to front fan-out calculation
                 const eyeX = me[H.x];
                 const eyeY = me[H.y] + 0.4;
                 const eyeZ = me[H.z];
@@ -1469,7 +1516,6 @@
                 const rightX = Math.cos(yaw);
                 const rightZ = -Math.sin(yaw);
 
-                // Stable slot ordering by distance from player
                 activeEnemies.sort((a, b) => {
                     const distA = Math.hypot((a._serverPos?.x || a[H.x]) - eyeX, (a._serverPos?.z || a[H.z]) - eyeZ);
                     const distB = Math.hypot((b._serverPos?.x || b[H.x]) - eyeX, (b._serverPos?.z || b[H.z]) - eyeZ);
@@ -1484,12 +1530,10 @@
                         const posY = eyeY + fwdY * pullDist - 0.4;
                         const posZ = eyeZ + fwdZ * pullDist + rightZ * lateralOffset;
 
-                        // Phase 1 & 5: Write logical position
                         P[H.x] = posX;
                         P[H.y] = posY;
                         P[H.z] = posZ;
 
-                        // Write mesh transform and lerp targets
                         const actor = (H.actor && P[H.actor]) || P.ba;
                         if (actor) {
                             const m = actor[H.mesh] || actor.mesh;
@@ -1507,7 +1551,6 @@
                     }
                 });
             } else {
-                // Phase 1: 'hold' or 'aimserver' mode - freeze at initial snapshot
                 for (const P of activeEnemies) {
                     try {
                         if (!enemySnapshots.has(P)) {
@@ -1548,7 +1591,6 @@
 
     const playerHistory = new WeakMap();
 
-    // Phase 5: Aim at true server position if aimserver mode is active, else aim at visual position
     function anglesTo(P, me) {
         let targetX = P[H.x];
         let targetY = P[H.y];
@@ -1608,7 +1650,6 @@
         if (!actor || !actor.getChildMeshes) return;
         const body = actor[H.mesh];
 
-        // Cache original isVisible once per mesh
         if (body && !origMeshVisibility.has(body)) {
             origMeshVisibility.set(body, body.isVisible);
         }
@@ -1647,14 +1688,12 @@
     let origCamFov = null;
     let lastTargetPlayer = null;
 
-    // Tasks 1, 4, 6, 7: LIBERTYMUTUAL frame callback
     createAnonFunction("LIBERTYMUTUAL", function () {
         try {
             gameLoaded = true;
             ss.PLAYERS.forEach(P => { if (P && P.hasOwnProperty("ws")) ss.MYPLAYER = P; });
             if (!ss.MYPLAYER || !ss.SCENE || !ss.SCENE.activeCamera) return;
 
-            // Task 7: Cache H.actor per match, invalidate on player identity change
             if (ss.MYPLAYER !== cachedActorPlayer || !H.actor) {
                 H.actor = findKeyWithProperty(ss.MYPLAYER, H.mesh);
                 cachedActorPlayer = ss.MYPLAYER;
@@ -1671,7 +1710,6 @@
             applySelfVisibility(me);
             applyAmmoAndHealth(me);
 
-            // Auto-Jump / Bunny-Hop
             if (S.autoJump && me) {
                 try {
                     if (typeof me.canJump === 'function' && me.canJump()) {
@@ -1682,7 +1720,6 @@
                 } catch (e) { }
             }
 
-            // Phase 2: Re-assert shooting state while firing; force released state for at least 3 frames after release
             const sk = getShootingKey(me);
             if (sk) {
                 if (firing) {
@@ -1698,7 +1735,6 @@
 
             yawpitch.magicValue = 0.0025 * Math.max(0.15, S.smooth);
 
-            // Bug 6: Capture cam.fov once, restore pre-hack FOV when camFov is 0, skip while scoped
             if (origCamFov === null && typeof cam.fov === 'number') {
                 origCamFov = cam.fov;
             }
@@ -1724,33 +1760,15 @@
             const tc = Date.now();
             const fovRad = S.aimFov * DEG;
 
-            // Task 3: Target list recomputed fresh every frame, target = null before loop
             let target = null, best = Infinity;
             let closestP = null, closestDist = Infinity;
             let autoFireEnemy = null, bestFireAng = Infinity;
             const myId = me[H.uniqueId] || me.uniqueId || me.id;
 
-            // Phase 1: Apply teleport position for 3 consecutive frames
-            if (teleportFramesRemaining > 0 && teleportTargetPos && me) {
-                teleportFramesRemaining--;
-                try {
-                    me[H.x] = teleportTargetPos.x;
-                    me[H.y] = teleportTargetPos.y;
-                    me[H.z] = teleportTargetPos.z;
+            // sustained teleport write
+            applyTeleport(me);
 
-                    const actor = (H.actor && me[H.actor]) || me.ba;
-                    if (actor) {
-                        const m = actor[H.mesh] || actor.mesh;
-                        if (m && m.position) {
-                            m.position.x = teleportTargetPos.x;
-                            m.position.y = teleportTargetPos.y;
-                            m.position.z = teleportTargetPos.z;
-                        }
-                    }
-                } catch (e) { }
-            }
-
-            // Phase 1 fallback: Drive movement input / velocity vector toward target for 400ms
+            // velocity drive fallback
             if (Date.now() < teleportDriveUntil && teleportTargetPos && me) {
                 try {
                     const toX = teleportTargetPos.x - me[H.x];
@@ -1768,10 +1786,7 @@
                 } catch (e) { }
             }
 
-            // Phase 2: Check auto escape when health drops below threshold
             checkAutoEscape(me);
-
-            // Phases 1 & 2: Update enemy position manipulation (freeze / pull to front)
             updateEnemyManipulation(me);
 
             for (const P of ss.PLAYERS) {
@@ -1779,7 +1794,6 @@
                 const pId = P[H.uniqueId] || P.uniqueId || P.id;
                 if (pId && myId && pId === myId) continue;
 
-                // Task 8: Never draw for teammates; dispose on teammate transition
                 const isMate = me.team !== 0 && P.team === me.team;
                 if (isMate) {
                     killLabel(P);
@@ -1795,7 +1809,6 @@
                     continue;
                 }
 
-                // Task 8: Dispose on death (check playing flag, health, and mesh existence)
                 const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] :
                             (typeof P.kb === 'number' ? P.kb : (typeof P.hp === 'number' ? P.hp : 100));
                 const isAlive = !!P[H.playing] && pHp > 0;
@@ -1904,22 +1917,19 @@
                 if (S.enabled) {
                     const a = anglesTo(P, me);
                     if (typeof a.ang === 'number' && !isNaN(a.ang)) {
-                        // Strict Auto-Fire check: enemy must be directly inside autoFireFov cone and within 75m
                         if (a.ang <= S.autoFireFov * DEG && pDist <= 75 && pDist >= 0.5 && a.ang < bestFireAng) {
                             bestFireAng = a.ang;
                             autoFireEnemy = { P, ...a, dist: pDist };
                         }
-                        // Aimbot target check
                         if (a.ang <= fovRad && pDist >= 0.5) {
                             let score = S.targetMode === 'nearest' ? pDist : a.ang;
-                            if (P === lastTargetPlayer) score *= 0.75; // Stick to currently locked target
+                            if (P === lastTargetPlayer) score *= 0.75;
                             if (score < best) { best = score; target = { P, ...a, dist: pDist }; }
                         }
                     }
                 }
             }
 
-            // Task 8: Closest enemy box is red, all other enemy boxes white; updates in same frame
             const whiteCol = BABYLON.Color3.FromHexString('#ffffff');
             const redCol = BABYLON.Color3.FromHexString('#ff2222');
             for (const P of ss.PLAYERS) {
@@ -1940,7 +1950,6 @@
                 lastTargetPlayer = null;
             }
 
-            // Phase 2: Strict auto-fire gating in exact veto order
             let wantFire = true;
             if (!S.enabled) {
                 wantFire = false;
@@ -1963,14 +1972,12 @@
                         fireEvent(true);
                     }
                 } else {
-                    // Phase 2: Pulse cycling to support semi-auto weapons and enforce per-shot delay
                     const delay = Math.max(30, S.autoFireDelay || 0);
                     if (now - lastShotAt >= delay) {
                         fireEvent(false);
                         fireEvent(true);
                         burstStartAt = now;
                     } else if (now - burstStartAt >= 4000) {
-                        // Watchdog: release and repress if held continuously > 4000ms
                         fireEvent(false);
                         fireEvent(true);
                         burstStartAt = now;
@@ -1984,16 +1991,14 @@
                 }
             }
 
-            // Status line shows clear state: OFF, READY, LOCKED, or FIRING
             if (statusEl) {
                 const activeTgt = autoFireEnemy || target;
                 const tgtStr = activeTgt ? (activeTgt.ang / DEG).toFixed(1) + '°' : '-';
                 const fireState = !S.autoFire ? 'OFF' : (firing ? 'FIRING' : (autoFireEnemy ? 'LOCKED' : 'READY'));
                 statusEl.textContent =
-                    `tgt ${tgtStr} | fire ${fireState} | ${ammoStatusStr} | ${healthStatusStr}`;
+                    `tgt ${tgtStr} | fire ${fireState} | ${ammoStatusStr} | ${healthStatusStr} | esc ${escReason}`;
             }
 
-            // Task 4: Dispose dead and teammate players
             for (let i = ESPArray.length - 1; i >= 0; i--) {
                 const P = ESPArray[i][2];
                 const isMate = P && me.team !== 0 && P.team === me.team;
@@ -2018,7 +2023,6 @@
                 } else ring.style.display = 'none';
             }
         } catch (e) {
-            // Task 7: Log first occurrence only
             if (!frameErrorLogged) {
                 frameErrorLogged = true;
                 log('Frame callback error:', e);
@@ -2147,7 +2151,6 @@
         }
     }
 
-    // keeps aim key and menu keys from colliding
     function bindKey(button, onPick, currentText) {
         try {
             button.textContent = 'press...';
@@ -2187,7 +2190,6 @@
         } catch (e) { }
     }
 
-    // Modern Tabbed Menu GUI (v2.7 by hasithx)
     function buildPanel() {
         try {
             panel = document.createElement('div');
@@ -2201,12 +2203,11 @@
             panel.addEventListener('mouseup', stopEv);
             panel.addEventListener('wheel', stopEv);
 
-            // Title bar: drag handle, version, close button
             const headBar = document.createElement('div');
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #333';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.8</span> <span style="color:#888;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.9</span> <span style="color:#888;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2222,13 +2223,11 @@
             headBar.appendChild(closeBtn);
             panel.appendChild(headBar);
 
-            // Status bar
             statusEl = document.createElement('div');
             statusEl.style.cssText = 'color:#8fd18f;margin-bottom:6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#141416;padding:3px 6px;border-radius:4px;border:1px solid #282828';
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
-            // Tabs navigation (Phase 4: includes ESCAPE & ENEMIES groups)
             const tabRow = document.createElement('div');
             tabRow.style.cssText = 'display:flex;gap:3px;margin-bottom:8px';
             panel.appendChild(tabRow);
@@ -2273,7 +2272,6 @@
                 tabPages[t] = page;
             });
 
-            // ====== TAB 1: COMBAT ======
             const pageCombat = tabPages.combat;
             check(pageCombat, 'Auto fire', 'autoFire');
             check(pageCombat, 'Lead prediction', 'prediction');
@@ -2292,20 +2290,34 @@
             range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
             range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
 
-            // ====== TAB 2: ESCAPE (Phase 4) ======
             const pageEscape = tabPages.escape;
             check(pageEscape, 'Auto escape', 'autoEscape');
             range(pageEscape, 'Escape HP', 'escapeHp', 10, 90, 5);
             range(pageEscape, 'Search radius (m)', 'escapeRadius', 3, 15, 1);
+            range(pageEscape, 'Teleport ms', 'teleportMs', 200, 2000, 50);
             const pBtnRow = row(pageEscape, 'Points');
             btn(pBtnRow, 'Save Point (G)', () => saveCurrentPoint());
             btn(pBtnRow, 'Go To (H)', () => gotoNearestPoint());
+
+            const tRow = row(pageEscape, 'Test');
+            btn(tRow, 'TP +10m X', () => {
+                const me = ss.MYPLAYER;
+                if (!me) { showToast('not in match'); return; }
+                startTeleport(me[H.x] + 10, me[H.y], me[H.z]);
+                showToast('test teleport +10m X');
+            });
+            btn(tRow, 'TP +10m Z', () => {
+                const me = ss.MYPLAYER;
+                if (!me) { showToast('not in match'); return; }
+                startTeleport(me[H.x], me[H.y], me[H.z] + 10);
+                showToast('test teleport +10m Z');
+            });
+
             const escInfo = document.createElement('div');
             escInfo.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
-            escInfo.innerHTML = '<b>Auto Escape:</b> Relocates player to cover when HP drops.<br>• Raycasts 12 candidate spots.<br>• Teleports & drives velocity into cover.<br>• Keys: <b>[G]</b> Save | <b>[H]</b> Goto';
+            escInfo.innerHTML = '<b>Auto Escape:</b> Relocates player to cover when HP drops.<br>• Raycasts 12 candidate spots.<br>• Teleports &amp; drives velocity into cover.<br>• Keys: <b>[G]</b> Save | <b>[H]</b> Goto<br>• Status shows <b>esc reason</b>';
             pageEscape.appendChild(escInfo);
 
-            // ====== TAB 3: ENEMIES ======
             const pageEnemies = tabPages.enemies;
             check(pageEnemies, 'Freeze enemies', 'freezeEnemies');
             select(pageEnemies, 'Mode', 'freezeMode', [
@@ -2319,7 +2331,6 @@
             enemyNote.innerHTML = '<b>Notice:</b> Game is server-authoritative.<br>• <i>Hold/Pull:</i> Overwrites visual meshes.<br>• <i>Aim Server:</i> Aimbot targets actual server position.';
             pageEnemies.appendChild(enemyNote);
 
-            // ====== TAB 3: VISUALS ======
             const pageVis = tabPages.visuals;
             check(pageVis, 'ESP boxes', 'espBox');
             check(pageVis, 'ESP tracers', 'espTracer');
@@ -2330,7 +2341,6 @@
             check(pageVis, 'FOV ring', 'fovCircle');
             range(pageVis, 'Camera FOV (0=def)', 'camFov', 0, 130, 5);
 
-            // ====== TAB 4: MISC ======
             const pageMisc = tabPages.misc;
             check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
             check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
@@ -2339,7 +2349,6 @@
             check(pageMisc, 'Hide own body', 'hideOwnBody');
             check(pageMisc, 'Hide own gun', 'hideOwnGun');
 
-            // ====== TAB 5: CONFIG ======
             const pageCfg = tabPages.config;
             const pRow = row(pageCfg, 'Presets');
             btn(pRow, 'Legit', () => applyPreset('legit'));
@@ -2363,7 +2372,6 @@
 
             switchTab(activeTab);
 
-            // Drag handling
             const onDragStart = e => {
                 panelDrag = true;
                 panelOx = e.clientX - panel.offsetLeft;
@@ -2377,7 +2385,6 @@
         } catch (e) { }
     }
 
-    // Task 6: togglePanel with pointer lock management & cursor handling
     function togglePanel() {
         try {
             if (panel) {
@@ -2404,5 +2411,5 @@
         else setTimeout(boot, 100);
     };
     boot();
-    log('LM v2.5 loaded');
+    log('LM v2.9 loaded');
 })();

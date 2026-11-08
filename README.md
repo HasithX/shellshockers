@@ -1,12 +1,15 @@
-# Shell Shockers Aimbot & ESP (LM v2.8)
+# Shell Shockers Aimbot & ESP (LM v2.9)
 
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
 - **Auto-Fire:** Pure triggerbot with FOV cone gating, delay pacing, and watchdog protection. Automatically fires when an enemy enters your sights.
-- **Auto Escape & Safe Points:**
-  - `Auto Escape`: When HP drops below threshold, raycasts 12 candidate points around the player, picks the spot blocking line-of-sight to the most enemies, and relocates to cover.
-  - `Manual Safe Points`: Save safe positions (`KeyG`) to `localStorage` and teleport back (`KeyH`) with directional input velocity assist.
+- **Auto Escape & Safe Points (v2.9 Sustained Teleport Overhaul):**
+  - `Sustained Position & Mirror Sync`: Overwrites coordinates (`H.x`, `H.y`, `H.z`), Wasm physics vectors (`H.coords`), mesh transform, and lerp targets continuously over a configurable window (`teleportMs`, default 800 ms), completely resolving the snap-back bug.
+  - `Smart Point Navigation`: `G` saves current position; `H` teleports back to nearest saved point without accidentally targeting the spot you are currently standing on.
+  - `Auto Escape`: When HP drops below threshold, raycasts 12 candidate spots around player with non-pickable floor detection, evaluates line-of-sight against all enemies within 45m, and escapes to safety.
+  - `Test & Diagnostics`: One-click `TP +10m X` and `TP +10m Z` buttons in the Escape tab to verify teleportation instantly.
+  - `Live Status Bar Telemetry`: Real-time `esc` state readout (`hp ok`, `recover`, `no enemy`, `cooldown`, `airborne`, or blocked LOS ratio).
 - **Enemy Position Manipulation:**
   - `Hold position`: Freezes enemies in their current tracks client-side.
   - `Pull to front`: Relocates living enemies into a lateral arc in front of your crosshair.
@@ -26,7 +29,7 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ### 1-Click Install / Update
 If you have **Violentmonkey** or **Tampermonkey** installed, open this link in your browser:
-👉 **[Install LM v2.8](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
+👉 **[Install LM v2.9](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
 
 The extension will pop up with an **Install** or **Update** button. Click it, then refresh Shell Shockers.
 
@@ -47,5 +50,3 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 
 ## License
 GPL-3.0
-
-

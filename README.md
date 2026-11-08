@@ -4,6 +4,10 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ## 🚀 Features
 - **Auto-Fire:** Pure triggerbot with FOV cone gating, delay pacing, and watchdog protection. Automatically fires when an enemy enters your sights.
+- **Enemy Position Manipulation:**
+  - `Hold position`: Freezes enemies in their current tracks client-side.
+  - `Pull to front`: Relocates living enemies into a lateral arc in front of your crosshair.
+  - `Aim Server`: Visual freeze while the aimbot tracks the true server hitbox for guaranteed hit registration.
 - **Upgraded Aimbot & Target Tracking:**
   - **Lead Prediction:** Distance and velocity-based lead calculation to lock onto fast-moving and jumping targets.
   - **Aim Height Offset:** Configurable vertical aim level (defaults to upper chest/head instead of ground level).

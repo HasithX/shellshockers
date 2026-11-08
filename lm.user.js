@@ -44,6 +44,9 @@
         autoFireDelay: 30,
         autoFireFov: 3.5,
         autoFireWhenMenuOpen: false,
+        freezeEnemies: false,
+        freezeMode: 'hold',
+        pullDistance: 8,
         prediction: true,
         aimHeight: 0.35,
         autoJump: false,
@@ -558,7 +561,96 @@
 
     let lastSnapshot = null;
 
-    function LM_DUMP() {
+    function LM_DUMP(targetPlayer) {
+        // Phase 0: Extend LM_DUMP to take a player argument
+        if (targetPlayer && typeof targetPlayer === 'object') {
+            console.group('%c[LM_DUMP] Player Inspection', 'color:#e8c400;font-weight:bold');
+            const P = targetPlayer;
+            const actor = (H.actor && P[H.actor]) ? P[H.actor] : (P.ba || null);
+            const mesh = actor ? (actor[H.mesh] || actor.mesh) : null;
+            const meshPos = mesh && mesh.position ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null;
+
+            console.log('Player Mesh Position:', meshPos);
+
+            // 1. Every numeric property between -2000 and 2000 with its value on P
+            console.group('P numeric properties (-2000 to 2000)');
+            const pNums = {};
+            for (const k of Object.keys(P)) {
+                try {
+                    const v = P[k];
+                    if (typeof v === 'number' && v >= -2000 && v <= 2000 && !isNaN(v)) {
+                        pNums[k] = v;
+                    }
+                } catch (e) { }
+            }
+            console.table(Object.entries(pNums).map(([key, value]) => ({ key, value })));
+            console.groupEnd();
+
+            // 2. The same for P[H.actor]
+            if (actor) {
+                console.group('P[H.actor] numeric properties (-2000 to 2000)');
+                const aNums = {};
+                for (const k of Object.keys(actor)) {
+                    try {
+                        const v = actor[k];
+                        if (typeof v === 'number' && v >= -2000 && v <= 2000 && !isNaN(v)) {
+                            aNums[k] = v;
+                        }
+                    } catch (e) { }
+                }
+                console.table(Object.entries(aNums).map(([key, value]) => ({ key, value })));
+                console.groupEnd();
+            }
+
+            // 3. The same for P[H.actor][H.mesh]
+            if (mesh) {
+                console.group('Mesh numeric properties');
+                const mNums = {};
+                for (const k of Object.keys(mesh)) {
+                    try {
+                        const v = mesh[k];
+                        if (typeof v === 'number' && v >= -2000 && v <= 2000 && !isNaN(v)) {
+                            mNums[k] = v;
+                        }
+                    } catch (e) { }
+                }
+                console.table(Object.entries(mNums).map(([key, value]) => ({ key, value })));
+                console.groupEnd();
+            }
+
+            // 4. Interpolation target, previous position, or velocity detection
+            console.group('Interpolation & Position Candidates');
+            if (meshPos) {
+                const candidates = [];
+                const checkObj = (obj, name) => {
+                    if (!obj) return;
+                    for (const k of Object.keys(obj)) {
+                        try {
+                            const val = obj[k];
+                            if (typeof val === 'number') {
+                                const diffX = Math.abs(val - meshPos.x);
+                                const diffY = Math.abs(val - meshPos.y);
+                                const diffZ = Math.abs(val - meshPos.z);
+                                if (diffX < 5 || diffY < 5 || diffZ < 5) {
+                                    candidates.push({ object: name, property: k, value: val, note: `close to axis (diffs: x=${diffX.toFixed(2)}, y=${diffY.toFixed(2)}, z=${diffZ.toFixed(2)})` });
+                                }
+                            } else if (val && typeof val === 'object' && typeof val.x === 'number') {
+                                const dist = Math.hypot(val.x - meshPos.x, (val.y || 0) - meshPos.y, (val.z || 0) - meshPos.z);
+                                candidates.push({ object: name, property: k, value: `{x:${val.x.toFixed(2)}, y:${val.y?.toFixed(2)}, z:${val.z?.toFixed(2)}}`, note: `Vector3 (dist to mesh: ${dist.toFixed(2)})` });
+                            }
+                        } catch (e) { }
+                    }
+                };
+                checkObj(P, 'P');
+                checkObj(actor, 'P[H.actor]');
+                console.table(candidates);
+            }
+            console.groupEnd();
+
+            console.groupEnd();
+            return;
+        }
+
         console.group('%c[LM_DUMP] Game State Snapshot', 'color:#e8c400;font-weight:bold');
 
         // 1. ss.MYPLAYER properties
@@ -1018,24 +1110,178 @@
         return P[tracersKey];
     }
 
+    // ================= ENEMY POSITION MANIPULATION (Phases 1, 2, 5) =================
+    const enemySnapshots = new Map();
+    let lastFreezeState = false;
+    const failedFreezePlayers = new WeakSet();
+
+    function updateEnemyManipulation(me) {
+        try {
+            if (!S.freezeEnemies) {
+                if (lastFreezeState) {
+                    enemySnapshots.clear();
+                    for (const P of ss.PLAYERS) {
+                        if (!P || P === me) continue;
+                        try {
+                            delete P._serverPos;
+                            const actor = (H.actor && P[H.actor]) || P.ba;
+                            if (actor && typeof actor.resetLerp === 'function') {
+                                actor.resetLerp();
+                            }
+                        } catch (e) { }
+                    }
+                    lastFreezeState = false;
+                }
+                return;
+            }
+
+            lastFreezeState = true;
+
+            // Phase 5 Safety: Never touch ss.MYPLAYER; skip inactive/dead players; clear snapshots on death
+            for (const [P] of enemySnapshots) {
+                const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : 100);
+                if (!P[H.playing] || pHp <= 0 || !ss.PLAYERS.includes(P)) {
+                    enemySnapshots.delete(P);
+                    try { delete P._serverPos; } catch (e) { }
+                }
+            }
+
+            const activeEnemies = [];
+            for (const P of ss.PLAYERS) {
+                if (!P || P === me || failedFreezePlayers.has(P)) continue;
+                if (me.team !== 0 && P.team === me.team) continue;
+                const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : 100);
+                if (!P[H.playing] || pHp <= 0) continue;
+
+                // Cache real server position prior to overwrite
+                if (!P._serverPos) {
+                    P._serverPos = { x: P[H.x], y: P[H.y], z: P[H.z] };
+                } else if (!S.freezeEnemies) {
+                    P._serverPos.x = P[H.x]; P._serverPos.y = P[H.y]; P._serverPos.z = P[H.z];
+                }
+                activeEnemies.push(P);
+            }
+
+            if (S.freezeMode === 'pull') {
+                // Phase 2: Pull to front fan-out calculation
+                const eyeX = me[H.x];
+                const eyeY = me[H.y] + 0.4;
+                const eyeZ = me[H.z];
+                const yaw = me[H.yaw];
+                const pitch = -me[H.pitch];
+                const pullDist = Math.max(3, Math.min(25, S.pullDistance || 8));
+
+                const fwdX = -Math.sin(yaw) * Math.cos(pitch);
+                const fwdY = -Math.sin(pitch);
+                const fwdZ = -Math.cos(yaw) * Math.cos(pitch);
+                const rightX = Math.cos(yaw);
+                const rightZ = -Math.sin(yaw);
+
+                // Stable slot ordering by distance from player
+                activeEnemies.sort((a, b) => {
+                    const distA = Math.hypot((a._serverPos?.x || a[H.x]) - eyeX, (a._serverPos?.z || a[H.z]) - eyeZ);
+                    const distB = Math.hypot((b._serverPos?.x || b[H.x]) - eyeX, (b._serverPos?.z || b[H.z]) - eyeZ);
+                    return distA - distB;
+                });
+
+                const count = activeEnemies.length;
+                activeEnemies.forEach((P, idx) => {
+                    try {
+                        const lateralOffset = (idx - (count - 1) / 2) * 0.8;
+                        const posX = eyeX + fwdX * pullDist + rightX * lateralOffset;
+                        const posY = eyeY + fwdY * pullDist - 0.4;
+                        const posZ = eyeZ + fwdZ * pullDist + rightZ * lateralOffset;
+
+                        // Phase 1 & 5: Write logical position
+                        P[H.x] = posX;
+                        P[H.y] = posY;
+                        P[H.z] = posZ;
+
+                        // Write mesh transform and lerp targets
+                        const actor = (H.actor && P[H.actor]) || P.ba;
+                        if (actor) {
+                            const m = actor[H.mesh] || actor.mesh;
+                            if (m && m.position) {
+                                m.position.x = posX;
+                                m.position.y = posY;
+                                m.position.z = posZ;
+                            }
+                            if (actor.lerpTargetPosition) actor.lerpTargetPosition.copyFromFloats(posX, posY, posZ);
+                            if (actor.lerpToPosition) actor.lerpToPosition.copyFromFloats(posX, posY, posZ);
+                            if (actor.lerpFromPosition) actor.lerpFromPosition.copyFromFloats(posX, posY, posZ);
+                        }
+                    } catch (err) {
+                        failedFreezePlayers.add(P);
+                    }
+                });
+            } else {
+                // Phase 1: 'hold' or 'aimserver' mode - freeze at initial snapshot
+                for (const P of activeEnemies) {
+                    try {
+                        if (!enemySnapshots.has(P)) {
+                            const actor = (H.actor && P[H.actor]) || P.ba;
+                            const m = actor ? (actor[H.mesh] || actor.mesh) : null;
+                            const snap = (m && m.position)
+                                ? { x: m.position.x, y: m.position.y, z: m.position.z }
+                                : { x: P[H.x], y: P[H.y], z: P[H.z] };
+                            enemySnapshots.set(P, snap);
+                        }
+
+                        const snap = enemySnapshots.get(P);
+                        if (snap) {
+                            P[H.x] = snap.x;
+                            P[H.y] = snap.y;
+                            P[H.z] = snap.z;
+
+                            const actor = (H.actor && P[H.actor]) || P.ba;
+                            if (actor) {
+                                const m = actor[H.mesh] || actor.mesh;
+                                if (m && m.position) {
+                                    m.position.x = snap.x;
+                                    m.position.y = snap.y;
+                                    m.position.z = snap.z;
+                                }
+                                if (actor.lerpTargetPosition) actor.lerpTargetPosition.copyFromFloats(snap.x, snap.y, snap.z);
+                                if (actor.lerpToPosition) actor.lerpToPosition.copyFromFloats(snap.x, snap.y, snap.z);
+                                if (actor.lerpFromPosition) actor.lerpFromPosition.copyFromFloats(snap.x, snap.y, snap.z);
+                            }
+                        }
+                    } catch (err) {
+                        failedFreezePlayers.add(P);
+                    }
+                }
+            }
+        } catch (e) { }
+    }
+
     const playerHistory = new WeakMap();
 
+    // Phase 5: Aim at true server position if aimserver mode is active, else aim at visual position
     function anglesTo(P, me) {
-        let predX = P[H.x];
-        let predY = P[H.y];
-        let predZ = P[H.z];
+        let targetX = P[H.x];
+        let targetY = P[H.y];
+        let targetZ = P[H.z];
+        if (S.freezeEnemies && S.freezeMode === 'aimserver' && P._serverPos) {
+            targetX = P._serverPos.x;
+            targetY = P._serverPos.y;
+            targetZ = P._serverPos.z;
+        }
+
+        let predX = targetX;
+        let predY = targetY;
+        let predZ = targetZ;
 
         const nowMs = performance.now();
         const prev = playerHistory.get(P);
         if (prev && prev.time) {
             const dt = Math.max(0.001, (nowMs - prev.time) / 1000);
             if (dt < 0.25) {
-                const vx = (P[H.x] - prev.x) / dt;
-                const vy = (P[H.y] - prev.y) / dt;
-                const vz = (P[H.z] - prev.z) / dt;
+                const vx = (targetX - prev.x) / dt;
+                const vy = (targetY - prev.y) / dt;
+                const vz = (targetZ - prev.z) / dt;
 
                 if (S.prediction) {
-                    const dist = Math.hypot(P[H.x] - me[H.x], P[H.y] - me[H.y], P[H.z] - me[H.z]);
+                    const dist = Math.hypot(targetX - me[H.x], targetY - me[H.y], targetZ - me[H.z]);
                     const leadTime = Math.min(0.12, Math.max(0.025, (dist / 175) + 0.035));
                     predX += vx * leadTime;
                     predY += vy * leadTime;
@@ -1043,7 +1289,7 @@
                 }
             }
         }
-        playerHistory.set(P, { x: P[H.x], y: P[H.y], z: P[H.z], time: nowMs });
+        playerHistory.set(P, { x: targetX, y: targetY, z: targetZ, time: nowMs });
 
         const aimH = (typeof S.aimHeight === 'number') ? S.aimHeight : 0.35;
         const dx = -(predX - me[H.x]);
@@ -1191,6 +1437,9 @@
             let closestP = null, closestDist = Infinity;
             let autoFireEnemy = null, bestFireAng = Infinity;
             const myId = me[H.uniqueId] || me.uniqueId || me.id;
+
+            // Phases 1 & 2: Update enemy position manipulation (freeze / pull to front)
+            updateEnemyManipulation(me);
 
             for (const P of ss.PLAYERS) {
                 if (!P || P === me) continue;
@@ -1610,7 +1859,7 @@
         try {
             panel = document.createElement('div');
             panel.id = 'lm-panel';
-            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:260px;max-height:380px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(18,18,22,.96);color:#ddd;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:8px;z-index:2147483600;box-shadow:0 8px 30px rgba(0,0,0,.8);user-select:none';
+            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:270px;max-height:420px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(18,18,22,.96);color:#ddd;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:8px;z-index:2147483600;box-shadow:0 8px 30px rgba(0,0,0,.8);user-select:none';
 
             const stopEv = e => e.stopPropagation();
             stopEv.__lmUI = true;
@@ -1646,18 +1895,18 @@
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
-            // Tabs navigation
+            // Tabs navigation (Phase 4: includes ENEMIES group)
             const tabRow = document.createElement('div');
             tabRow.style.cssText = 'display:flex;gap:4px;margin-bottom:8px';
             panel.appendChild(tabRow);
 
-            const tabs = ['combat', 'visuals', 'misc', 'config'];
-            const tabLabels = { combat: 'Combat', visuals: 'Visuals', misc: 'Misc', config: 'Config' };
+            const tabs = ['combat', 'enemies', 'visuals', 'misc', 'config'];
+            const tabLabels = { combat: 'Combat', enemies: 'Enemies', visuals: 'Visuals', misc: 'Misc', config: 'Config' };
             const tabButtons = {};
             const tabPages = {};
 
             const contentArea = document.createElement('div');
-            contentArea.style.cssText = 'overflow-y:auto;max-height:260px;padding-right:2px;overscroll-behavior:contain';
+            contentArea.style.cssText = 'overflow-y:auto;max-height:300px;padding-right:2px;overscroll-behavior:contain';
             panel.appendChild(contentArea);
 
             let activeTab = S.activeTab || 'combat';
@@ -1680,7 +1929,7 @@
             tabs.forEach(t => {
                 const b = document.createElement('button');
                 b.textContent = tabLabels[t];
-                b.style.cssText = 'flex:1;border:none;border-radius:4px;padding:4px 2px;font:10px monospace;cursor:pointer;transition:background .15s';
+                b.style.cssText = 'flex:1;border:none;border-radius:4px;padding:4px 1px;font:10px monospace;cursor:pointer;transition:background .15s';
                 b.onclick = () => switchTab(t);
                 tabRow.appendChild(b);
                 tabButtons[t] = b;
@@ -1710,7 +1959,21 @@
             range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
             range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
 
-            // ====== TAB 2: VISUALS ======
+            // ====== TAB 2: ENEMIES (Phase 4) ======
+            const pageEnemies = tabPages.enemies;
+            check(pageEnemies, 'Freeze enemies', 'freezeEnemies');
+            select(pageEnemies, 'Mode', 'freezeMode', [
+                ['hold', 'Hold spot'],
+                ['pull', 'Pull front'],
+                ['aimserver', 'Aim Server (Hit Reg)']
+            ]);
+            range(pageEnemies, 'Pull distance', 'pullDistance', 3, 25, 1);
+            const enemyNote = document.createElement('div');
+            enemyNote.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
+            enemyNote.innerHTML = '<b>Notice:</b> Game is server-authoritative.<br>• <i>Hold/Pull:</i> Overwrites visual meshes.<br>• <i>Aim Server:</i> Aimbot targets actual server position.';
+            pageEnemies.appendChild(enemyNote);
+
+            // ====== TAB 3: VISUALS ======
             const pageVis = tabPages.visuals;
             check(pageVis, 'ESP boxes', 'espBox');
             check(pageVis, 'ESP tracers', 'espTracer');
@@ -1721,7 +1984,7 @@
             check(pageVis, 'FOV ring', 'fovCircle');
             range(pageVis, 'Camera FOV (0=def)', 'camFov', 0, 130, 5);
 
-            // ====== TAB 3: MISC ======
+            // ====== TAB 4: MISC ======
             const pageMisc = tabPages.misc;
             check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
             check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
@@ -1730,7 +1993,7 @@
             check(pageMisc, 'Hide own body', 'hideOwnBody');
             check(pageMisc, 'Hide own gun', 'hideOwnGun');
 
-            // ====== TAB 4: CONFIG ======
+            // ====== TAB 5: CONFIG ======
             const pageCfg = tabPages.config;
             const pRow = row(pageCfg, 'Presets');
             btn(pRow, 'Legit', () => applyPreset('legit'));

@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Shell Shockers Aimbot + ESP (LM v2.5)
-// @namespace    https://github.com/onlypuppy7/LibertyMutualShellShockers/
+// @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
 // @version      2.5.0-vm
-// @author       hasithx, onlypuppy7 (VM port + extended)
+// @author       hasithx
 // @description  ESP, tracers, auto-fire, FOV aimbot, self-hide, closest highlight, infinite ammo, GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*

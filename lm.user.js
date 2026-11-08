@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (LM v2.7)
+// @name         Shell Shockers Aimbot + ESP (LM v2.8)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      2.7.0
+// @version      2.8.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, self-hide, closest highlight, infinite ammo, modern tabbed GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern tabbed GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -47,6 +47,11 @@
         freezeEnemies: false,
         freezeMode: 'hold',
         pullDistance: 8,
+        autoEscape: false,
+        escapeHp: 35,
+        escapeRadius: 7,
+        savePointKey: 'KeyG',
+        gotoPointKey: 'KeyH',
         prediction: true,
         aimHeight: 0.35,
         autoJump: false,
@@ -107,6 +112,15 @@
             return;
         }
         if (isTyping()) return;
+        // Phase 1: Manual save and goto safe points
+        if (e.code === (S.savePointKey || 'KeyG')) {
+            saveCurrentPoint();
+            return;
+        }
+        if (e.code === (S.gotoPointKey || 'KeyH')) {
+            gotoNearestPoint();
+            return;
+        }
         keys.add(e.code);
         if (e.code === S.aimToggleKey && S.aimMode === 'toggle') aimToggled = !aimToggled;
     };
@@ -653,11 +667,27 @@
 
         console.group('%c[LM_DUMP] Game State Snapshot', 'color:#e8c400;font-weight:bold');
 
-        // 1. ss.MYPLAYER properties
+        // 1. ss.MYPLAYER properties (Phase 0: numeric properties between -2000 and 2000, booleans, mesh position)
         console.group('ss.MYPLAYER properties');
         if (typeof ss !== 'undefined' && ss.MYPLAYER) {
-            const playerProps = getCleanProps(ss.MYPLAYER);
-            console.table(Object.entries(playerProps).map(([key, value]) => ({
+            const me = ss.MYPLAYER;
+            const actor = (H.actor && me[H.actor]) ? me[H.actor] : (me.ba || null);
+            const mesh = actor ? (actor[H.mesh] || actor.mesh) : null;
+            const meshPos = mesh && mesh.position ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null;
+            console.log('ss.MYPLAYER Mesh Position:', meshPos);
+
+            const filteredProps = {};
+            for (const k of Object.keys(me)) {
+                try {
+                    const v = me[k];
+                    if (typeof v === 'boolean') {
+                        filteredProps[k] = v;
+                    } else if (typeof v === 'number' && v >= -2000 && v <= 2000 && !isNaN(v)) {
+                        filteredProps[k] = v;
+                    }
+                } catch (e) { }
+            }
+            console.table(Object.entries(filteredProps).map(([key, value]) => ({
                 key, type: typeof value, value
             })));
         } else {
@@ -1110,6 +1140,268 @@
         return P[tracersKey];
     }
 
+    // ================= TOAST NOTIFICATION (Phase 1) =================
+    let toastTimeout = null;
+    function showToast(msg) {
+        try {
+            let t = document.getElementById('lm-toast');
+            if (!t) {
+                t = document.createElement('div');
+                t.id = 'lm-toast';
+                t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(18,18,22,0.94);color:#e8c400;font:bold 12px monospace;padding:6px 14px;border:1px solid #e8c400;border-radius:6px;z-index:2147483600;box-shadow:0 4px 16px rgba(0,0,0,0.7);pointer-events:none;transition:opacity 0.25s;opacity:0';
+                document.body.appendChild(t);
+            }
+            t.textContent = msg;
+            t.style.opacity = '1';
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                if (t) t.style.opacity = '0';
+            }, 2000);
+        } catch (e) { }
+    }
+
+    // ================= MANUAL SAFE POINTS (Phase 1) =================
+    function getSavedPoints() {
+        try {
+            return JSON.parse(localStorage.getItem('lm_points_v1') || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveCurrentPoint() {
+        if (!ss.MYPLAYER) {
+            showToast('Cannot save point: not in match');
+            return;
+        }
+        try {
+            const me = ss.MYPLAYER;
+            const pts = getSavedPoints();
+            const newPt = {
+                x: me[H.x],
+                y: me[H.y],
+                z: me[H.z],
+                name: `Point ${pts.length + 1}`,
+                time: Date.now()
+            };
+            pts.push(newPt);
+            while (pts.length > 10) pts.shift();
+            localStorage.setItem('lm_points_v1', JSON.stringify(pts));
+            showToast(`Point #${pts.length} saved (${newPt.x.toFixed(1)}, ${newPt.y.toFixed(1)}, ${newPt.z.toFixed(1)})`);
+        } catch (e) {
+            showToast('Failed to save point');
+        }
+    }
+
+    let teleportFramesRemaining = 0;
+    let teleportTargetPos = null;
+    let teleportDriveUntil = 0;
+
+    function startTeleport(x, y, z) {
+        teleportTargetPos = { x, y, z };
+        teleportFramesRemaining = 3;
+        teleportDriveUntil = Date.now() + 400;
+        // Phase 2: Reset aimbot target cache after teleport
+        lastTargetPlayer = null;
+    }
+
+    function gotoNearestPoint() {
+        if (!ss.MYPLAYER) {
+            showToast('Cannot teleport: not in match');
+            return;
+        }
+        try {
+            const me = ss.MYPLAYER;
+            const pts = getSavedPoints();
+            if (pts.length === 0) {
+                showToast('No saved safe points found');
+                return;
+            }
+            let nearest = null;
+            let nearestDist = Infinity;
+            let nearestIdx = -1;
+            pts.forEach((pt, i) => {
+                const dist = Math.hypot(pt.x - me[H.x], pt.y - me[H.y], pt.z - me[H.z]);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = pt;
+                    nearestIdx = i + 1;
+                }
+            });
+            if (nearest) {
+                startTeleport(nearest.x, nearest.y, nearest.z);
+                showToast(`Teleporting to Point #${nearestIdx} (${nearestDist.toFixed(1)}m)`);
+            }
+        } catch (e) {
+            showToast('Teleport failed');
+        }
+    }
+
+    // ================= AUTO COVER SEARCH & ESCAPE (Phases 2 & 3) =================
+    let lastEscapeTime = 0;
+    let escapeTriggeredHp = 0;
+    let waitingForHpRecovery = false;
+    let lastEscapeSpot = null;
+
+    function checkAutoEscape(me) {
+        if (!S.autoEscape || !me || !ss.SCENE) return;
+
+        const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
+        const escapeThreshold = S.escapeHp || 35;
+
+        // Recovery hysteresis: no escape while below threshold after an escape until HP recovers above threshold + 10
+        if (waitingForHpRecovery) {
+            if (myHp >= escapeTriggeredHp + 10) {
+                waitingForHpRecovery = false;
+            } else {
+                return;
+            }
+        }
+
+        if (myHp > escapeThreshold) return;
+
+        const now = Date.now();
+        if (now - lastEscapeTime < 3000) return; // 3-second cooldown
+
+        // Never escape while airborne if onGround flag resolves
+        if (typeof me.onGround === 'number' && me.onGround <= 0) return;
+
+        // Check if at least one enemy is within 45m (cap at 8 enemies to bound cost)
+        const enemiesWithin45m = [];
+        for (const P of ss.PLAYERS) {
+            if (!P || P === me || !P[H.playing]) continue;
+            if (me.team !== 0 && P.team === me.team) continue;
+            const pHp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : 100);
+            if (pHp <= 0) continue;
+
+            const dist = Math.hypot(P[H.x] - me[H.x], P[H.y] - me[H.y], P[H.z] - me[H.z]);
+            if (dist <= 45) {
+                enemiesWithin45m.push({ P, dist });
+                if (enemiesWithin45m.length >= 8) break;
+            }
+        }
+
+        if (enemiesWithin45m.length === 0) return;
+
+        try {
+            // Predicate ignoring all player meshes and our ESP lines
+            const ignoredMeshes = new Set();
+            for (const P of ss.PLAYERS) {
+                if (!P) continue;
+                try {
+                    const actor = (H.actor && P[H.actor]) || P.ba;
+                    if (actor) {
+                        if (actor.mesh) ignoredMeshes.add(actor.mesh);
+                        if (typeof actor.getChildMeshes === 'function') {
+                            actor.getChildMeshes().forEach(m => ignoredMeshes.add(m));
+                        }
+                    }
+                    if (P.box) ignoredMeshes.add(P.box);
+                    if (P[tracersKey]) ignoredMeshes.add(P[tracersKey]);
+                } catch (e) { }
+            }
+
+            const predicate = mesh => {
+                if (!mesh || !mesh.isPickable) return false;
+                if (ignoredMeshes.has(mesh)) return false;
+                if (mesh.name && (mesh.name.includes('esp') || mesh.name.includes('box') || mesh.name.includes('tracer'))) return false;
+                return true;
+            };
+
+            const radius = Math.max(3, Math.min(15, S.escapeRadius || 7));
+            const myX = me[H.x];
+            const myY = me[H.y];
+            const myZ = me[H.z];
+
+            // 1. Build 12 candidate points on a ring around player
+            const survivingCandidates = [];
+            const downDir = new BABYLON.Vector3(0, -1, 0);
+
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2;
+                const candX = myX + Math.cos(angle) * radius;
+                const candZ = myZ + Math.sin(angle) * radius;
+
+                // 2. Raycast downward from 2m above to find floor
+                const downOrigin = new BABYLON.Vector3(candX, myY + 2.0, candZ);
+                const downRay = new BABYLON.Ray(downOrigin, downDir, 5.0);
+                const floorHit = ss.SCENE.pickWithRay(downRay, predicate);
+
+                if (!floorHit || !floorHit.hit || !floorHit.pickedPoint) continue;
+                // Discard if hit is further than 3m below
+                if (floorHit.distance > 5.0) continue;
+
+                const candY = floorHit.pickedPoint.y;
+                survivingCandidates.push({ x: candX, y: candY, z: candZ });
+            }
+
+            if (survivingCandidates.length === 0) return;
+
+            // 3. Score candidates by blocked line of sight to enemies
+            let bestCand = null;
+            let bestBlocked = -1;
+            let bestDist = Infinity;
+            let maxDistCandidate = null;
+            let maxDist = -1;
+
+            for (const cand of survivingCandidates) {
+                // Avoid jumping into same spot twice in a row
+                if (lastEscapeSpot && Math.hypot(cand.x - lastEscapeSpot.x, cand.z - lastEscapeSpot.z) < 1.5) {
+                    continue;
+                }
+
+                const candEye = new BABYLON.Vector3(cand.x, cand.y + 0.4, cand.z);
+                let blockedCount = 0;
+
+                for (const { P } of enemiesWithin45m) {
+                    const enemyEye = new BABYLON.Vector3(P[H.x], P[H.y] + 0.4, P[H.z]);
+                    const distToEnemy = BABYLON.Vector3.Distance(candEye, enemyEye);
+                    const dirToEnemy = enemyEye.subtract(candEye).normalize();
+                    const losRay = new BABYLON.Ray(candEye, dirToEnemy, distToEnemy);
+                    const hit = ss.SCENE.pickWithRay(losRay, predicate);
+
+                    if (hit && hit.hit && hit.distance < distToEnemy - 0.5) {
+                        blockedCount++;
+                    }
+                }
+
+                const distFromPlayer = Math.hypot(cand.x - myX, cand.z - myZ);
+                if (distFromPlayer > maxDist) {
+                    maxDist = distFromPlayer;
+                    maxDistCandidate = cand;
+                }
+
+                // 4. Score: number of blocked enemy lines of sight, then distance from player
+                if (blockedCount > bestBlocked) {
+                    bestBlocked = blockedCount;
+                    bestDist = distFromPlayer;
+                    bestCand = cand;
+                } else if (blockedCount === bestBlocked && distFromPlayer < bestDist) {
+                    bestDist = distFromPlayer;
+                    bestCand = cand;
+                }
+            }
+
+            // 5. If best candidate blocks zero lines, take farthest one
+            const targetSpot = (bestBlocked > 0 && bestCand) ? bestCand : (maxDistCandidate || survivingCandidates[0]);
+
+            if (targetSpot) {
+                lastEscapeSpot = { x: targetSpot.x, y: targetSpot.y, z: targetSpot.z };
+                lastEscapeTime = now;
+                escapeTriggeredHp = myHp;
+                waitingForHpRecovery = true;
+
+                startTeleport(targetSpot.x, targetSpot.y, targetSpot.z);
+                showToast(`Auto Escape: Cover reached (${bestBlocked}/${enemiesWithin45m.length} LoS blocked)`);
+            }
+        } catch (err) {
+            console.error('[LM Auto-Escape Error]', err);
+            S.autoEscape = false;
+            save();
+            showToast('Auto-escape error - disabled');
+        }
+    }
+
     // ================= ENEMY POSITION MANIPULATION (Phases 1, 2, 5) =================
     const enemySnapshots = new Map();
     let lastFreezeState = false;
@@ -1437,6 +1729,47 @@
             let closestP = null, closestDist = Infinity;
             let autoFireEnemy = null, bestFireAng = Infinity;
             const myId = me[H.uniqueId] || me.uniqueId || me.id;
+
+            // Phase 1: Apply teleport position for 3 consecutive frames
+            if (teleportFramesRemaining > 0 && teleportTargetPos && me) {
+                teleportFramesRemaining--;
+                try {
+                    me[H.x] = teleportTargetPos.x;
+                    me[H.y] = teleportTargetPos.y;
+                    me[H.z] = teleportTargetPos.z;
+
+                    const actor = (H.actor && me[H.actor]) || me.ba;
+                    if (actor) {
+                        const m = actor[H.mesh] || actor.mesh;
+                        if (m && m.position) {
+                            m.position.x = teleportTargetPos.x;
+                            m.position.y = teleportTargetPos.y;
+                            m.position.z = teleportTargetPos.z;
+                        }
+                    }
+                } catch (e) { }
+            }
+
+            // Phase 1 fallback: Drive movement input / velocity vector toward target for 400ms
+            if (Date.now() < teleportDriveUntil && teleportTargetPos && me) {
+                try {
+                    const toX = teleportTargetPos.x - me[H.x];
+                    const toZ = teleportTargetPos.z - me[H.z];
+                    const distH = Math.hypot(toX, toZ);
+                    if (distH > 0.3) {
+                        const dirX = toX / distH;
+                        const dirZ = toZ / distH;
+                        if (typeof me.dx === 'number') me.dx = dirX * 0.28;
+                        if (typeof me.$a === 'number') me.$a = dirZ * 0.28;
+                        if (typeof me.Va === 'number') me.Va = dirX * 0.28;
+                        if (typeof me.Ya === 'number') me.Ya = dirZ * 0.28;
+                        if (typeof me.Ia === 'number') me.Ia |= 1;
+                    }
+                } catch (e) { }
+            }
+
+            // Phase 2: Check auto escape when health drops below threshold
+            checkAutoEscape(me);
 
             // Phases 1 & 2: Update enemy position manipulation (freeze / pull to front)
             updateEnemyManipulation(me);
@@ -1859,7 +2192,7 @@
         try {
             panel = document.createElement('div');
             panel.id = 'lm-panel';
-            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:270px;max-height:420px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(18,18,22,.96);color:#ddd;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:8px;z-index:2147483600;box-shadow:0 8px 30px rgba(0,0,0,.8);user-select:none';
+            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:280px;max-height:460px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(18,18,22,.96);color:#ddd;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:8px;z-index:2147483600;box-shadow:0 8px 30px rgba(0,0,0,.8);user-select:none';
 
             const stopEv = e => e.stopPropagation();
             stopEv.__lmUI = true;
@@ -1873,7 +2206,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #333';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.7</span> <span style="color:#888;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.8</span> <span style="color:#888;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -1895,18 +2228,18 @@
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
-            // Tabs navigation (Phase 4: includes ENEMIES group)
+            // Tabs navigation (Phase 4: includes ESCAPE & ENEMIES groups)
             const tabRow = document.createElement('div');
-            tabRow.style.cssText = 'display:flex;gap:4px;margin-bottom:8px';
+            tabRow.style.cssText = 'display:flex;gap:3px;margin-bottom:8px';
             panel.appendChild(tabRow);
 
-            const tabs = ['combat', 'enemies', 'visuals', 'misc', 'config'];
-            const tabLabels = { combat: 'Combat', enemies: 'Enemies', visuals: 'Visuals', misc: 'Misc', config: 'Config' };
+            const tabs = ['combat', 'escape', 'enemies', 'visuals', 'misc', 'config'];
+            const tabLabels = { combat: 'Combat', escape: 'Escape', enemies: 'Enemies', visuals: 'Visuals', misc: 'Misc', config: 'Config' };
             const tabButtons = {};
             const tabPages = {};
 
             const contentArea = document.createElement('div');
-            contentArea.style.cssText = 'overflow-y:auto;max-height:300px;padding-right:2px;overscroll-behavior:contain';
+            contentArea.style.cssText = 'overflow-y:auto;max-height:340px;padding-right:2px;overscroll-behavior:contain';
             panel.appendChild(contentArea);
 
             let activeTab = S.activeTab || 'combat';
@@ -1959,7 +2292,20 @@
             range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
             range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
 
-            // ====== TAB 2: ENEMIES (Phase 4) ======
+            // ====== TAB 2: ESCAPE (Phase 4) ======
+            const pageEscape = tabPages.escape;
+            check(pageEscape, 'Auto escape', 'autoEscape');
+            range(pageEscape, 'Escape HP', 'escapeHp', 10, 90, 5);
+            range(pageEscape, 'Search radius (m)', 'escapeRadius', 3, 15, 1);
+            const pBtnRow = row(pageEscape, 'Points');
+            btn(pBtnRow, 'Save Point (G)', () => saveCurrentPoint());
+            btn(pBtnRow, 'Go To (H)', () => gotoNearestPoint());
+            const escInfo = document.createElement('div');
+            escInfo.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
+            escInfo.innerHTML = '<b>Auto Escape:</b> Relocates player to cover when HP drops.<br>• Raycasts 12 candidate spots.<br>• Teleports & drives velocity into cover.<br>• Keys: <b>[G]</b> Save | <b>[H]</b> Goto';
+            pageEscape.appendChild(escInfo);
+
+            // ====== TAB 3: ENEMIES ======
             const pageEnemies = tabPages.enemies;
             check(pageEnemies, 'Freeze enemies', 'freezeEnemies');
             select(pageEnemies, 'Mode', 'freezeMode', [

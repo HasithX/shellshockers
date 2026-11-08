@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (LM v2.9)
+// @name         Shell Shockers Aimbot + ESP (LM v2.10)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      2.9.0
+// @version      2.10.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern tabbed GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, modern tabbed GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -68,6 +68,10 @@
         closestColor: '#ff2222',
         camFov: 0,
         fovCircle: true,
+        shootPoint: true,
+        shootPointStyle: 'cyber',
+        fovColor: '#00f0ff',
+        fovDynamicColor: true,
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -1001,17 +1005,76 @@
         }
     }
 
-    // ================= LABEL OVERLAY =================
-    let overlay = null, labels = new Map();
+    // ================= ADVANCE SHOOT POINT & RETICLE HUD =================
+    function getShootPointSvg(style) {
+        switch (style) {
+            case 'dot':
+                return '<svg viewBox="0 0 28 28" style="width:100%;height:100%;display:block;overflow:visible;filter:drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 5px currentColor)">' +
+                    '<circle cx="14" cy="14" r="3.2" fill="currentColor" />' +
+                    '<circle cx="14" cy="14" r="1.3" fill="#ffffff" opacity="0.9" />' +
+                '</svg>';
+            case 'crosshair':
+                return '<svg viewBox="0 0 28 28" style="width:100%;height:100%;display:block;overflow:visible;filter:drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 4px currentColor)">' +
+                    '<circle cx="14" cy="14" r="2.0" fill="currentColor" />' +
+                    '<line x1="14" y1="2" x2="14" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+                    '<line x1="14" y1="20" x2="14" y2="26" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+                    '<line x1="2" y1="14" x2="8" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+                    '<line x1="20" y1="14" x2="26" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+                '</svg>';
+            case 'circle':
+                return '<svg viewBox="0 0 28 28" style="width:100%;height:100%;display:block;overflow:visible;filter:drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 5px currentColor)">' +
+                    '<circle cx="14" cy="14" r="2.5" fill="currentColor" />' +
+                    '<circle cx="14" cy="14" r="8" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0.85" />' +
+                '</svg>';
+            case 'cyber':
+            default:
+                return '<svg viewBox="0 0 28 28" style="width:100%;height:100%;display:block;overflow:visible;filter:drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 6px currentColor)">' +
+                    '<circle cx="14" cy="14" r="2.4" fill="currentColor" />' +
+                    '<circle cx="14" cy="14" r="1.0" fill="#ffffff" opacity="0.95" />' +
+                    '<circle cx="14" cy="14" r="7" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.75" />' +
+                    '<line x1="14" y1="1" x2="14" y2="5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />' +
+                    '<line x1="14" y1="23" x2="14" y2="27" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />' +
+                    '<line x1="1" y1="14" x2="5" y2="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />' +
+                    '<line x1="23" y1="14" x2="27" y2="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />' +
+                '</svg>';
+        }
+    }
+
+    // ================= LABEL & HUD OVERLAY =================
+    let overlay = null, labels = new Map(), lastRenderedStyle = null;
     function ensureOverlay() {
-        if (overlay) return overlay;
+        if (overlay && document.body && document.body.contains(overlay)) return overlay;
+        if (overlay) { try { overlay.remove(); } catch (e) { } }
         overlay = document.createElement('div');
         overlay.id = 'lm-overlay';
         overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483000;overflow:hidden';
+
+        // Outer FOV Ring with 4 tactical quadrant ticks
         const ring = document.createElement('div');
         ring.id = 'lm-fovring';
-        ring.style.cssText = 'position:absolute;left:50%;top:50%;border:1px solid rgba(255,255,255,.35);border-radius:50%;transform:translate(-50%,-50%);display:none';
+        ring.style.cssText = 'position:absolute;left:50%;top:50%;border:1.5px solid #00f0ff;border-radius:50%;transform:translate(-50%,-50%);display:none;box-sizing:border-box;pointer-events:none;filter:drop-shadow(0 0 2px rgba(0,0,0,0.8));transition:border-color 0.15s ease, box-shadow 0.15s ease';
+
+        const ticks = ['top', 'right', 'bottom', 'left'];
+        for (const t of ticks) {
+            const tick = document.createElement('div');
+            tick.className = 'lm-fovtick lm-fovtick-' + t;
+            let tickCss = 'position:absolute;background:currentColor;box-shadow:0 0 4px currentColor;pointer-events:none;border-radius:1px;';
+            if (t === 'top') tickCss += 'width:2px;height:10px;left:50%;top:-5px;transform:translateX(-50%);';
+            else if (t === 'bottom') tickCss += 'width:2px;height:10px;left:50%;bottom:-5px;transform:translateX(-50%);';
+            else if (t === 'left') tickCss += 'height:2px;width:10px;top:50%;left:-5px;transform:translateY(-50%);';
+            else if (t === 'right') tickCss += 'height:2px;width:10px;top:50%;right:-5px;transform:translateY(-50%);';
+            tick.style.cssText = tickCss;
+            ring.appendChild(tick);
+        }
         overlay.appendChild(ring);
+
+        // Center Advanced Shoot Point Reticle
+        const sp = document.createElement('div');
+        sp.id = 'lm-shootpoint';
+        sp.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:28px;height:28px;display:none;pointer-events:none;color:#00f0ff;transition:transform 0.12s ease, color 0.15s ease';
+        overlay.appendChild(sp);
+
+        lastRenderedStyle = null;
         document.body.appendChild(overlay);
         return overlay;
     }
@@ -2014,13 +2077,54 @@
                 ESPArray.splice(i, 1);
             }
 
+            ensureOverlay();
             const ring = document.getElementById('lm-fovring');
+            const sp = document.getElementById('lm-shootpoint');
+
+            // Dynamic color state: idle -> aim lock -> fire cone
+            let activeColor = S.fovColor || '#00f0ff';
+            if (S.fovDynamicColor) {
+                if (firing || (autoFireEnemy && autoFireEnemy.ang <= (S.autoFireFov || 3.5) * DEG)) {
+                    activeColor = '#ff1744'; // Hot red on fire or fire-cone lock
+                } else if (target) {
+                    activeColor = '#ffea00'; // Electric gold on aimbot target lock
+                }
+            }
+
+            // Update FOV Ring (with safe boundary fallbacks so it never vanishes)
             if (ring) {
                 if (S.fovCircle && S.enabled) {
-                    const r = (S.aimFov * DEG / (cam.fov / 2)) * (innerHeight / 2);
+                    const camFov = (cam && typeof cam.fov === 'number' && cam.fov > 0.05) ? cam.fov : 0.8;
+                    let r = (S.aimFov * DEG / (camFov / 2)) * (innerHeight / 2);
+                    if (!isFinite(r) || isNaN(r) || r < 4) r = 60;
+                    r = Math.min(r, Math.max(innerWidth, innerHeight) * 0.95);
+
                     ring.style.display = 'block';
-                    ring.style.width = ring.style.height = (r * 2) + 'px';
-                } else ring.style.display = 'none';
+                    ring.style.width = (r * 2) + 'px';
+                    ring.style.height = (r * 2) + 'px';
+                    ring.style.color = activeColor;
+                    ring.style.borderColor = activeColor;
+                    ring.style.boxShadow = `0 0 10px ${activeColor}88, inset 0 0 8px ${activeColor}33`;
+                } else {
+                    ring.style.display = 'none';
+                }
+            }
+
+            // Update Center Advanced Shoot Point Reticle
+            if (sp) {
+                if (S.shootPoint && S.enabled) {
+                    const curStyle = S.shootPointStyle || 'cyber';
+                    if (lastRenderedStyle !== curStyle) {
+                        lastRenderedStyle = curStyle;
+                        sp.innerHTML = getShootPointSvg(curStyle);
+                    }
+                    sp.style.display = 'block';
+                    sp.style.color = activeColor;
+                    const scale = firing ? '1.25' : (target ? '1.1' : '1.0');
+                    sp.style.transform = `translate(-50%, -50%) scale(${scale})`;
+                } else {
+                    sp.style.display = 'none';
+                }
             }
         } catch (e) {
             if (!frameErrorLogged) {
@@ -2207,7 +2311,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #333';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.9</span> <span style="color:#888;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.10</span> <span style="color:#888;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2338,7 +2442,17 @@
             check(pageVis, 'ESP health', 'espHealth');
             check(pageVis, 'ESP distance', 'espDistance');
             check(pageVis, 'Closest red box', 'highlightClosest');
+            head(pageVis, 'Aim & Crosshair Reticle');
             check(pageVis, 'FOV ring', 'fovCircle');
+            check(pageVis, 'Advance shoot point', 'shootPoint');
+            select(pageVis, 'Reticle style', 'shootPointStyle', [
+                ['cyber', 'Cyber HUD'],
+                ['crosshair', 'Crosshair'],
+                ['dot', 'Glowing Dot'],
+                ['circle', 'Circle Reticle']
+            ]);
+            check(pageVis, 'Dynamic lock color', 'fovDynamicColor');
+            color(pageVis, 'Reticle color', 'fovColor');
             range(pageVis, 'Camera FOV (0=def)', 'camFov', 0, 130, 5);
 
             const pageMisc = tabPages.misc;
@@ -2411,5 +2525,5 @@
         else setTimeout(boot, 100);
     };
     boot();
-    log('LM v2.9 loaded');
+    log('LM v2.10 loaded');
 })();

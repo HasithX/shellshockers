@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (LM v2.5)
+// @name         Shell Shockers Aimbot + ESP (LM v2.6)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      2.5.0-vm
+// @version      2.6.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, self-hide, closest highlight, infinite ammo, GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, self-hide, closest highlight, infinite ammo, modern tabbed GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -12,6 +12,8 @@
 // @grant        unsafeWindow
 // @run-at       document-start
 // @require      https://cdn.jsdelivr.net/npm/babylonjs@7.15.0/babylon.min.js
+// @downloadURL  https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js
+// @updateURL    https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js
 // ==/UserScript==
 
 (function () {
@@ -59,7 +61,8 @@
         infiniteAmmo: false,
         holdHealth: false,
         ammoValue: 999,
-        panelKeys: ['Insert', 'Backquote']
+        panelKeys: ['Insert', 'Backquote'],
+        activeTab: 'combat'
     };
     const S = Object.assign({}, DEF, (() => {
         try { return JSON.parse(localStorage.getItem('lm_cfg_v2') || '{}'); } catch (e) { return {}; }
@@ -1526,27 +1529,27 @@
                 Object.assign(S, {
                     aimMode: 'hold', aimFov: 25, smooth: 2.5, targetMode: 'crosshair',
                     autoFire: false, autoFireOnlyAiming: false, autoFireFov: 2, autoFireDelay: 50,
-                    espBox: true, espTracer: false, espHealth: false, espDistance: false,
-                    hideOwnBody: true, hideOwnGun: false, highlightClosest: true
+                    espBox: true, espTracer: false, espName: true, espHealth: false, espDistance: false,
+                    hideOwnBody: true, hideOwnGun: false, highlightClosest: true, fovCircle: true, camFov: 0
                 });
             } else {
                 Object.assign(S, {
                     aimMode: 'hold', aimFov: 70, smooth: 0.35, targetMode: 'crosshair',
                     autoFire: true, autoFireOnlyAiming: false, autoFireFov: 4, autoFireDelay: 50,
-                    espBox: true, espTracer: true, espHealth: true, espDistance: true,
-                    hideOwnBody: true, hideOwnGun: true, highlightClosest: true
+                    espBox: true, espTracer: true, espName: true, espHealth: true, espDistance: true,
+                    hideOwnBody: true, hideOwnGun: true, highlightClosest: true, fovCircle: true, camFov: 90
                 });
             }
             save(); if (panel) { panel.remove(); panel = null; } buildPanel();
         } catch (e) { }
     }
 
-    // Tasks 6 & 7: Simplified menu (no headers, under 320px) and pointer lock / event handling
+    // Modern Tabbed Menu GUI (v2.6 by hasithx)
     function buildPanel() {
         try {
             panel = document.createElement('div');
             panel.id = 'lm-panel';
-            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:240px;max-height:310px;overflow-y:auto;overscroll-behavior:contain;pointer-events:auto;background:rgba(16,16,16,.95);color:#ddd;font:11px monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:6px;z-index:2147483600;box-shadow:0 6px 24px #000a';
+            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:260px;max-height:380px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(18,18,22,.96);color:#ddd;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:8px 10px;border:1px solid #e8c400;border-radius:8px;z-index:2147483600;box-shadow:0 8px 30px rgba(0,0,0,.8);user-select:none';
 
             const stopEv = e => e.stopPropagation();
             stopEv.__lmUI = true;
@@ -1555,26 +1558,85 @@
             panel.addEventListener('mouseup', stopEv);
             panel.addEventListener('wheel', stopEv);
 
-            const title = document.createElement('div');
-            title.textContent = 'LM v2.5 by hasithx';
-            title.style.cssText = 'font-weight:bold;color:#e8c400;cursor:move;margin-bottom:4px;user-select:none';
-            panel.appendChild(title);
+            // Title bar: drag handle, version, close button
+            const headBar = document.createElement('div');
+            headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #333';
 
+            const title = document.createElement('div');
+            title.innerHTML = '<span style="color:#e8c400;font-weight:bold;font-size:12px">LM v2.6</span> <span style="color:#888;font-size:10px">by hasithx</span>';
+            headBar.appendChild(title);
+
+            const closeBtn = document.createElement('div');
+            closeBtn.textContent = '×';
+            closeBtn.title = 'Close menu (Toggle with ~ or Insert)';
+            closeBtn.style.cssText = 'cursor:pointer;color:#aaa;font-weight:bold;font-size:16px;line-height:12px;padding:2px 4px;border-radius:3px';
+            closeBtn.onmouseenter = () => closeBtn.style.color = '#fff';
+            closeBtn.onmouseleave = () => closeBtn.style.color = '#aaa';
+            closeBtn.onclick = e => {
+                e.stopPropagation();
+                togglePanel();
+            };
+            headBar.appendChild(closeBtn);
+            panel.appendChild(headBar);
+
+            // Status bar
             statusEl = document.createElement('div');
-            statusEl.style.cssText = 'color:#8fd18f;margin-bottom:6px;font-size:10px';
+            statusEl.style.cssText = 'color:#8fd18f;margin-bottom:6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#141416;padding:3px 6px;border-radius:4px;border:1px solid #282828';
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
-            // 1. Auto fire (checkbox - triggers automatically when target is in FOV cone)
-            check(panel, 'Auto fire', 'autoFire');
-            // 2. Fire when menu open (checkbox)
-            check(panel, 'Fire when menu open', 'autoFireWhenMenuOpen');
-            // 3. Fire FOV slider (0.5–15)
-            range(panel, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
-            // 4. Fire delay slider (0–300)
-            range(panel, 'Fire delay', 'autoFireDelay', 0, 300, 5);
-            // 5. Aim key binder
-            const kb = row(panel, 'Aim key');
+            // Tabs navigation
+            const tabRow = document.createElement('div');
+            tabRow.style.cssText = 'display:flex;gap:4px;margin-bottom:8px';
+            panel.appendChild(tabRow);
+
+            const tabs = ['combat', 'visuals', 'misc', 'config'];
+            const tabLabels = { combat: 'Combat', visuals: 'Visuals', misc: 'Misc', config: 'Config' };
+            const tabButtons = {};
+            const tabPages = {};
+
+            const contentArea = document.createElement('div');
+            contentArea.style.cssText = 'overflow-y:auto;max-height:260px;padding-right:2px;overscroll-behavior:contain';
+            panel.appendChild(contentArea);
+
+            let activeTab = S.activeTab || 'combat';
+            if (!tabs.includes(activeTab)) activeTab = 'combat';
+
+            function switchTab(t) {
+                activeTab = t;
+                S.activeTab = t;
+                save();
+                tabs.forEach(name => {
+                    if (tabPages[name]) tabPages[name].style.display = (name === t) ? 'block' : 'none';
+                    if (tabButtons[name]) {
+                        tabButtons[name].style.background = (name === t) ? '#e8c400' : '#282830';
+                        tabButtons[name].style.color = (name === t) ? '#111' : '#bbb';
+                        tabButtons[name].style.fontWeight = (name === t) ? 'bold' : 'normal';
+                    }
+                });
+            }
+
+            tabs.forEach(t => {
+                const b = document.createElement('button');
+                b.textContent = tabLabels[t];
+                b.style.cssText = 'flex:1;border:none;border-radius:4px;padding:4px 2px;font:10px monospace;cursor:pointer;transition:background .15s';
+                b.onclick = () => switchTab(t);
+                tabRow.appendChild(b);
+                tabButtons[t] = b;
+
+                const page = document.createElement('div');
+                page.style.display = 'none';
+                contentArea.appendChild(page);
+                tabPages[t] = page;
+            });
+
+            // ====== TAB 1: COMBAT ======
+            const pageCombat = tabPages.combat;
+            check(pageCombat, 'Auto fire', 'autoFire');
+            range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
+            range(pageCombat, 'Fire delay (ms)', 'autoFireDelay', 0, 300, 5);
+            check(pageCombat, 'Fire in menu', 'autoFireWhenMenuOpen');
+            const kb = row(pageCombat, 'Aim key');
             const kbBtn = btn(kb, S.aimKeys.join(',') || 'none', () => {
                 bindKey(kbBtn, code => {
                     S.aimKeys = [code];
@@ -1582,41 +1644,53 @@
                 }, () => S.aimKeys.join(','));
             });
             kbBtn.style.flex = '0 0 auto';
-            // 6. Aim FOV slider (5–180)
-            range(panel, 'Aim FOV', 'aimFov', 5, 180, 1);
-            // 7. Smoothness slider (0.15–4)
-            range(panel, 'Smoothness', 'smooth', 0.15, 4, 0.05);
-            // 8. ESP boxes (checkbox)
-            check(panel, 'ESP boxes', 'espBox');
-            // 9. Closest red box (checkbox)
-            check(panel, 'Closest red box', 'highlightClosest');
-            // 10. Infinite ammo (checkbox)
-            check(panel, 'Infinite ammo', 'infiniteAmmo');
-            // 10b. Ammo value slider
-            range(panel, 'Ammo value', 'ammoValue', 50, 9999, 50);
-            // 11. Hold max health (checkbox)
-            check(panel, 'Hold max health', 'holdHealth');
-            // 12. Hide own body (checkbox)
-            check(panel, 'Hide own body', 'hideOwnBody');
-            // 13. Hide own gun (checkbox)
-            check(panel, 'Hide own gun', 'hideOwnGun');
+            range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
+            range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
 
-            // 14. legit preset, rage preset, reset, dump
-            const foot = document.createElement('div');
-            foot.style.cssText = 'margin-top:6px;display:flex;gap:4px';
-            btn(foot, 'legit', () => applyPreset('legit'));
-            btn(foot, 'rage', () => applyPreset('rage'));
-            btn(foot, 'reset', () => {
+            // ====== TAB 2: VISUALS ======
+            const pageVis = tabPages.visuals;
+            check(pageVis, 'ESP boxes', 'espBox');
+            check(pageVis, 'ESP tracers', 'espTracer');
+            check(pageVis, 'ESP names', 'espName');
+            check(pageVis, 'ESP health', 'espHealth');
+            check(pageVis, 'ESP distance', 'espDistance');
+            check(pageVis, 'Closest red box', 'highlightClosest');
+            check(pageVis, 'FOV ring', 'fovCircle');
+            range(pageVis, 'Camera FOV (0=def)', 'camFov', 0, 130, 5);
+
+            // ====== TAB 3: MISC ======
+            const pageMisc = tabPages.misc;
+            check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
+            range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
+            check(pageMisc, 'Hold max health', 'holdHealth');
+            check(pageMisc, 'Hide own body', 'hideOwnBody');
+            check(pageMisc, 'Hide own gun', 'hideOwnGun');
+
+            // ====== TAB 4: CONFIG ======
+            const pageCfg = tabPages.config;
+            const pRow = row(pageCfg, 'Presets');
+            btn(pRow, 'Legit', () => applyPreset('legit'));
+            btn(pRow, 'Rage', () => applyPreset('rage'));
+
+            const aRow = row(pageCfg, 'Actions');
+            btn(aRow, 'Reset All', () => {
                 Object.assign(S, DEF);
                 save();
                 if (panel) { panel.remove(); panel = null; }
                 buildPanel();
             });
-            btn(foot, 'dump', () => {
+            btn(aRow, 'Dump State', () => {
                 if (typeof window.LM_DUMP === 'function') window.LM_DUMP();
             });
-            panel.appendChild(foot);
 
+            const info = document.createElement('div');
+            info.style.cssText = 'color:#777;font-size:10px;margin-top:10px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
+            info.innerHTML = 'Menu toggle: <b>[~]</b> or <b>[Insert]</b><br>Aim: <b>Right-Click (Mouse2)</b>';
+            pageCfg.appendChild(info);
+
+            switchTab(activeTab);
+
+            // Drag handling
             const onDragStart = e => {
                 panelDrag = true;
                 panelOx = e.clientX - panel.offsetLeft;
@@ -1624,7 +1698,7 @@
                 e.stopPropagation();
             };
             onDragStart.__lmUI = true;
-            title.addEventListener('mousedown', onDragStart);
+            headBar.addEventListener('mousedown', onDragStart);
 
             document.body.appendChild(panel);
         } catch (e) { }

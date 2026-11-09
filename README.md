@@ -1,11 +1,17 @@
-# Shell Shockers Aimbot & ESP (ST v3.1)
+# Shell Shockers Aimbot & ESP (ST v3.2)
 
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
-- **Tactical Innovations (v3.1 Upgrade):**
+- **Auto-Respawn Cursor Fix & Quality-of-Life (v3.2 Upgrade):**
+  - `Dead/Respawn Mouse Release`: Automatically exits HTML5 pointer lock when you get eliminated, allowing you to freely click "Play Again", "Respawn", or change loadouts without having to open the cheat menu.
+  - `Built-in AdBlocker`: Automatically hides and silences Shell Shockers video ads, pre-rolls, mid-rolls, and banners so matches load fast with zero FPS drops.
+  - `Spacious 3D Pill Navbar`: Redesigned 330px wide UI with distinct glowing pill navigation tabs, clear active/hover highlights, and spacious option padding.
+  - `Sniper Zoom (Toggle & Hold)`: Upgraded zoom logic that activates instantly on `KeyC` (configurable), supporting both single-click Toggle and Hold actions.
+  - `Continuous Auto-Escape`: Fixed recovery lockout hysteresis so auto-escape triggers reliably on every low-HP encounter without getting stuck.
+- **Tactical Innovations:**
   - `💣 Grenade Arc Trajectory Predictor`: Real-time 3D physics parabolic curve predicting the exact flight path, gravity drop, and landing/impact spot before throwing grenades.
-  - `🔭 Sniper Zoom (Binoculars Mode)`: Hold **[KeyC]** (configurable) with ANY weapon to smoothly zoom camera FOV down to 25° for high-powered reconnaissance and distant target tracking.
+  - `🔭 Sniper Zoom (Binoculars Mode)`: Smoothly zooms camera FOV down to 25° for high-powered reconnaissance and distant target tracking.
   - `📊 On-Screen Session Stats Widget (HUD)`: Glassmorphic Cyber Blue top-left corner widget displaying real-time **FPS Counter**, **Killstreak (with 🔥 fire aura)**, **Total Kills**, **Deaths**, and **K/D Ratio**, plus instant kill-confirmed notifications.
 - **Cyber Blue Modern Menu:**
   - Futuristic **Cyber Blue / Azure Neon** glassmorphic interface with vibrant gradients, custom tabs, interactive buttons, and high-visibility status indicators.
@@ -13,18 +19,13 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 - **Advanced Shoot Point & Tactical HUD:**
   - `Center Shoot Point Reticle`: High-precision glowing crosshair dot and focus reticle that never disappears or goes missing.
   - `Reticle Styles`: Choose between **Cyber HUD**, **Crosshair**, **Glowing Dot**, or **Circle Reticle**.
-  - `Dynamic Tactical Shifting`: Reticle and FOV circle dynamically shift colors in real time:
-    - *Cyan Neon / Chosen Color*: Idle / Scanning state.
-    - *Electric Gold*: Instant visual lock when an enemy enters your aimbot FOV cone.
-    - *Crimson Red*: Locked in auto-fire cone or shooting with subtle pulse animation.
-  - `Enhanced FOV Ring`: Neon glowing border with 4 tactical quadrant tick marks and drop-shadow contrast, preventing it from vanishing on bright sky or white egg textures.
+  - `Dynamic Tactical Shifting`: Reticle and FOV circle dynamically shift colors in real time (Cyan = Idle, Gold = Target locked, Red = In fire cone).
+  - `Enhanced FOV Ring`: Neon glowing border with 4 tactical quadrant tick marks and drop-shadow contrast.
 - **Auto-Fire:** Pure triggerbot with FOV cone gating, delay pacing, and watchdog protection. Automatically fires when an enemy enters your sights.
 - **Auto Escape & Safe Points:**
   - `Sustained Position & Mirror Sync`: Overwrites coordinates (`H.x`, `H.y`, `H.z`), Wasm physics vectors (`H.coords`), mesh transform, and lerp targets continuously over a configurable window (`teleportMs`, default 800 ms).
   - `Smart Point Navigation`: `G` saves current position; `H` teleports back to nearest saved point without accidentally targeting the spot you are currently standing on.
   - `Auto Escape`: When HP drops below threshold, raycasts 12 candidate spots around player with non-pickable floor detection, evaluates line-of-sight against all enemies within 45m, and escapes to safety.
-  - `Test & Diagnostics`: One-click `TP +10m X` and `TP +10m Z` buttons in the Escape tab to test displacement.
-  - `Live Status Bar Telemetry`: Real-time `esc` state readout (`hp ok`, `recover`, `no enemy`, `cooldown`, `airborne`, or blocked LOS ratio).
 - **Enemy Position Manipulation:**
   - `Hold position`: Freezes enemies in their current tracks client-side.
   - `Pull to front`: Relocates living enemies into a lateral arc in front of your crosshair.
@@ -44,7 +45,7 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ### 1-Click Install / Update
 If you have **Violentmonkey** or **Tampermonkey** installed, open this link in your browser:
-👉 **[Install ST v3.1](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
+👉 **[Install ST v3.2](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
 
 The extension will pop up with an **Install** or **Update** button. Click it, then refresh Shell Shockers.
 
@@ -57,7 +58,7 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 ## 🎮 Controls
 - **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `ST` button)
 - **Aim Key:** Hold `Right Mouse Button` (Mouse2)
-- **Sniper Zoom (Binoculars):** Hold `C` (configurable in Combat tab)
+- **Sniper Zoom (Binoculars):** Click or hold `C` (configurable in Combat tab)
 - **Save Safe Point:** `G`
 - **Teleport to Nearest Safe Point:** `H`
 

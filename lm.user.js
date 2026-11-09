@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (ST v3.1)
+// @name         Shell Shockers Aimbot + ESP (ST v3.2)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      3.1.0
+// @version      3.2.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, modern cyber blue GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, adblocker, auto-respawn cursor fix, modern cyber blue GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -76,7 +76,9 @@
         sniperZoom: true,
         zoomKey: 'KeyC',
         zoomFov: 25,
+        zoomMode: 'toggle',
         statsHud: true,
+        blockAds: true,
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -100,7 +102,7 @@
 
     // ================= INPUT =================
     const keys = new Set();
-    let mouse2 = false, aimToggled = false, firing = false;
+    let mouse2 = false, aimToggled = false, firing = false, zoomToggled = false;
     let lastShotAt = 0, burstStartAt = 0;
     let statusEl = null;
 
@@ -136,6 +138,11 @@
         if (e.code === (S.gotoPointKey || 'KeyH')) {
             gotoNearestPoint();
             return;
+        }
+        if (e.code === (S.zoomKey || 'KeyC') || e.key.toLowerCase() === 'c') {
+            if (S.zoomMode === 'toggle') {
+                zoomToggled = !zoomToggled;
+            }
         }
         keys.add(e.code);
         if (e.code === S.aimToggleKey && S.aimMode === 'toggle') aimToggled = !aimToggled;
@@ -359,10 +366,51 @@
             origCanvasRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
             HTMLCanvasElement.prototype.requestPointerLock = function (...args) {
                 if (panel) return Promise.resolve ? Promise.resolve() : undefined;
+                // If player is dead or in death screen, release mouse so Play button can be clicked!
+                if (typeof ss !== 'undefined' && ss.MYPLAYER) {
+                    const me = ss.MYPLAYER;
+                    const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
+                    if (!me[H.playing] || myHp <= 0) {
+                        return Promise.resolve ? Promise.resolve() : undefined;
+                    }
+                }
                 return origCanvasRequestPointerLock.apply(this, args);
             };
             HTMLCanvasElement.prototype.requestPointerLock.__lmHooked = true;
         }
+    }
+
+    // ================= AD BLOCKER =================
+    let lastAdBlockCheck = 0;
+    function applyAdBlock() {
+        if (!S.blockAds) return;
+        try {
+            if (!document.getElementById('st-adblock-style')) {
+                const style = document.createElement('style');
+                style.id = 'st-adblock-style';
+                style.textContent = `
+                    #adContainer, #adContainer2, #chumContainer, .ad-container, .ad-wrapper,
+                    [id*="adContainer"], [id*="google_ads"], iframe[src*="doubleclick"],
+                    iframe[src*="googlesyndication"], #preroll, .advertisement, #midroll {
+                        display: none !important;
+                        visibility: hidden !important;
+                        pointer-events: none !important;
+                        width: 0 !important;
+                        height: 0 !important;
+                        opacity: 0 !important;
+                    }
+                `;
+                (document.head || document.documentElement).appendChild(style);
+            }
+            const adSelectors = ['#adContainer', '#adContainer2', '#chumContainer', '[id*="adContainer"]', '#preroll'];
+            for (const sel of adSelectors) {
+                const el = document.querySelector(sel);
+                if (el && el.style.display !== 'none') {
+                    el.style.display = 'none';
+                    el.style.pointerEvents = 'none';
+                }
+            }
+        } catch (e) { }
     }
 
     function restorePointerLock() {
@@ -1369,8 +1417,10 @@
         const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
         const escapeThreshold = S.escapeHp || 35;
 
+        const now = Date.now();
         if (waitingForHpRecovery) {
-            if (myHp >= escapeTriggeredHp + 10) {
+            // Reset recovery lockout if HP recovered, after 4.5s timeout, or if player respawned with 100 HP
+            if (myHp >= escapeTriggeredHp + 10 || (now - lastEscapeTime > 4500) || myHp === 100) {
                 waitingForHpRecovery = false;
             } else {
                 escReason = 'recover';
@@ -1380,7 +1430,6 @@
 
         if (myHp > escapeThreshold) { escReason = 'hp ok'; return; }
 
-        const now = Date.now();
         if (now - lastEscapeTime < 3000) { escReason = 'cooldown'; return; }
 
         // Never escape while airborne (number OR boolean flag)
@@ -1990,12 +2039,31 @@
                 (H.scoped && me[H.scoped]) || (H.isScoped && me[H.isScoped]) ||
                 (me[H.weapon] && (me[H.weapon].isScoped || me[H.weapon].scoped)));
 
-            if (!isScoped) {
-                let targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
-                const isZooming = S.sniperZoom && keys.has(S.zoomKey || 'KeyC');
-                if (isZooming) {
-                    targetFov = (S.zoomFov || 25) * DEG;
+            // Release pointer lock on death so player can freely click Play/Respawn button!
+            const myHpVal = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
+            const isMeAlive = !!me[H.playing] && myHpVal > 0;
+            if (!isMeAlive) {
+                waitingForHpRecovery = false; // Reset escape lockout on death
+                if (document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (e) { }
                 }
+            }
+
+            // Periodic AdBlocker check
+            if (Date.now() - lastAdBlockCheck > 1500) {
+                lastAdBlockCheck = Date.now();
+                applyAdBlock();
+            }
+
+            // Sniper Zoom (prioritized so it works regardless of isScoped glitches)
+            const isZoomHeld = keys.has(S.zoomKey || 'KeyC') || keys.has('KeyC');
+            const isZooming = S.sniperZoom && (zoomToggled || isZoomHeld);
+
+            if (isZooming) {
+                const targetFov = (S.zoomFov || 25) * DEG;
+                cam.fov += (targetFov - cam.fov) * 0.35;
+            } else if (!isScoped) {
+                const targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
                 if (Math.abs(cam.fov - targetFov) > 0.005) {
                     cam.fov += (targetFov - cam.fov) * 0.35;
                 }
@@ -2344,9 +2412,10 @@
     function row(parent, label) {
         try {
             const d = document.createElement('div');
-            d.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0';
+            d.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin:5px 0;padding:2px 0';
             const s = document.createElement('span');
             s.textContent = label;
+            s.style.cssText = 'font-size:11px;color:#cbd5e1';
             d.appendChild(s);
             parent.appendChild(d);
             return d;
@@ -2491,7 +2560,7 @@
         try {
             panel = document.createElement('div');
             panel.id = 'st-panel';
-            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:290px;max-height:470px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(10,18,30,.96);color:#e2e8f0;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;padding:9px 12px;border:1.5px solid #00b4d8;border-radius:10px;z-index:2147483600;box-shadow:0 8px 32px rgba(0,0,0,.85), 0 0 16px rgba(0,180,216,0.25);user-select:none';
+            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:330px;max-height:510px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(10,18,30,.96);color:#e2e8f0;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:12px 14px;border:1.5px solid #00b4d8;border-radius:12px;z-index:2147483600;box-shadow:0 10px 35px rgba(0,0,0,.9), 0 0 18px rgba(0,180,216,0.28);user-select:none';
 
             const stopEv = e => e.stopPropagation();
             stopEv.__lmUI = true;
@@ -2504,7 +2573,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.1</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.2</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2526,7 +2595,7 @@
             panel.appendChild(statusEl);
 
             const tabRow = document.createElement('div');
-            tabRow.style.cssText = 'display:flex;gap:3px;margin-bottom:8px';
+            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(6, 1fr);gap:4px;background:rgba(6,12,20,0.75);padding:4px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
             panel.appendChild(tabRow);
 
             const tabs = ['combat', 'escape', 'enemies', 'visuals', 'misc', 'config'];
@@ -2535,7 +2604,7 @@
             const tabPages = {};
 
             const contentArea = document.createElement('div');
-            contentArea.style.cssText = 'overflow-y:auto;max-height:340px;padding-right:2px;overscroll-behavior:contain';
+            contentArea.style.cssText = 'overflow-y:auto;max-height:380px;padding-right:4px;overscroll-behavior:contain';
             panel.appendChild(contentArea);
 
             let activeTab = S.activeTab || 'combat';
@@ -2546,12 +2615,13 @@
                 S.activeTab = t;
                 save();
                 tabs.forEach(name => {
-                    if (tabPages[name]) tabPages[name].style.display = (name === t) ? 'block' : 'none';
+                    const isCur = (name === t);
+                    if (tabPages[name]) tabPages[name].style.display = isCur ? 'block' : 'none';
                     if (tabButtons[name]) {
-                        tabButtons[name].style.background = (name === t) ? 'linear-gradient(135deg, #00b4d8, #0077b6)' : '#101d2d';
-                        tabButtons[name].style.color = (name === t) ? '#ffffff' : '#94a3b8';
-                        tabButtons[name].style.boxShadow = (name === t) ? '0 0 10px rgba(0,180,216,0.5)' : 'none';
-                        tabButtons[name].style.fontWeight = (name === t) ? 'bold' : 'normal';
+                        tabButtons[name].style.background = isCur ? 'linear-gradient(135deg, #00b4d8, #0077b6)' : '#0d1826';
+                        tabButtons[name].style.color = isCur ? '#ffffff' : '#94a3b8';
+                        tabButtons[name].style.borderColor = isCur ? '#38bdf8' : 'rgba(0,180,216,0.15)';
+                        tabButtons[name].style.boxShadow = isCur ? '0 0 10px rgba(0,180,216,0.5), inset 0 1px 0 rgba(255,255,255,0.3)' : 'none';
                     }
                 });
             }
@@ -2559,7 +2629,21 @@
             tabs.forEach(t => {
                 const b = document.createElement('button');
                 b.textContent = tabLabels[t];
-                b.style.cssText = 'flex:1;border:none;border-radius:4px;padding:5px 1px;font:10px monospace;cursor:pointer;transition:all .15s ease;background:#101d2d;color:#94a3b8';
+                b.style.cssText = 'border:1px solid rgba(0,180,216,0.15);border-radius:6px;padding:6px 2px;font:bold 11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;transition:all .18s ease;background:#0d1826;color:#94a3b8;text-align:center;box-sizing:border-box';
+                b.onmouseenter = () => {
+                    if (activeTab !== t) {
+                        b.style.background = '#15253b';
+                        b.style.color = '#e2e8f0';
+                        b.style.borderColor = 'rgba(0,180,216,0.35)';
+                    }
+                };
+                b.onmouseleave = () => {
+                    if (activeTab !== t) {
+                        b.style.background = '#0d1826';
+                        b.style.color = '#94a3b8';
+                        b.style.borderColor = 'rgba(0,180,216,0.15)';
+                    }
+                };
                 b.onclick = () => switchTab(t);
                 tabRow.appendChild(b);
                 tabButtons[t] = b;
@@ -2589,6 +2673,10 @@
             range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
             head(pageCombat, 'Sniper Zoom (Binoculars)');
             check(pageCombat, 'Sniper zoom mode', 'sniperZoom');
+            select(pageCombat, 'Zoom action', 'zoomMode', [
+                ['toggle', 'Toggle (Click)'],
+                ['hold', 'Hold Key']
+            ]);
             const zk = row(pageCombat, 'Zoom key');
             const zkBtn = btn(zk, S.zoomKey || 'KeyC', () => {
                 bindKey(zkBtn, code => {
@@ -2664,6 +2752,7 @@
             check(pageVis, 'On-screen stats HUD', 'statsHud');
 
             const pageMisc = tabPages.misc;
+            check(pageMisc, 'Block & hide ads', 'blockAds');
             check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
             check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
             range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
@@ -2729,9 +2818,13 @@
     }
 
     const boot = () => {
-        if (document.body) { ensureOverlay(); ensureBadge(); }
-        else setTimeout(boot, 100);
+        if (document.body) {
+            ensureOverlay();
+            ensureBadge();
+            hookPointerLock();
+            applyAdBlock();
+        } else setTimeout(boot, 100);
     };
     boot();
-    log('ST v3.1 loaded');
+    log('ST v3.2 loaded');
 })();

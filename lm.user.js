@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (ST v3.3)
+// @name         Shell Shockers Aimbot + ESP (ST v3.4)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      3.3.0
+// @version      3.4.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, wheel gun switch, countdown fix, clean respawn, modern cyber blue GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, instant 7-gun switcher, wheel & keybind weapon select, clean respawn, modern cyber blue GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -79,6 +79,7 @@
         zoomMode: 'toggle',
         statsHud: true,
         wheelWeaponSwitch: true,
+        currentGun: '0',
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -143,6 +144,14 @@
             if (S.zoomMode === 'toggle') {
                 zoomToggled = !zoomToggled;
             }
+        }
+        // Direct number keys 1-7 for weapon selection
+        if (S.wheelWeaponSwitch && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].includes(e.code)) {
+            const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+            if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+            const gunNum = parseInt(e.code.replace('Digit', ''), 10) - 1;
+            selectGun(gunNum);
+            return;
         }
         keys.add(e.code);
         if (e.code === S.aimToggleKey && S.aimMode === 'toggle') aimToggled = !aimToggled;
@@ -372,64 +381,177 @@
         }
     }
 
-    // ================= MOUSE WHEEL WEAPON SWITCH =================
+    // ================= 7 GUN SELECTION & SWITCHING =================
     let currentGunIdx = 0;
-    const gunNames = ['EggK-47', 'Scrambler', 'Free Ranger', 'RPEGG', 'Whipper', 'Crackshot', 'Tri-Hard'];
+    const gunClassKeys = ['soldier', 'scrambler', 'ranger', 'rpegg', 'whipper', 'crackshot', 'trihard'];
+    const gunDisplayNames = [
+        'EggK-47',      // 0: Soldier
+        'Scrambler',    // 1: Scrambler (Shotgun)
+        'Free Ranger',  // 2: Ranger (Semi-Auto Sniper)
+        'RPEGG',        // 3: Eggsploder (Rocket)
+        'Whipper',      // 4: Whipper (SMG)
+        'Crackshot',    // 5: Crackshot (Bolt-Action Sniper)
+        'Tri-Hard'      // 6: Tri-Hard (Burst Rifle)
+    ];
 
-    function cycleGun(delta) {
-        if (typeof ss === 'undefined' || !ss.MYPLAYER) return;
-        const me = ss.MYPLAYER;
+    function detectCurrentGun() {
+        // 1. Check DOM for weapon marked as selected (.weapon_selected)
+        try {
+            const selEl = document.querySelector('.weapon_selected');
+            if (selEl) {
+                for (let i = 0; i < gunClassKeys.length; i++) {
+                    const key = gunClassKeys[i];
+                    const use = selEl.querySelector('use') || (selEl.tagName === 'USE' ? selEl : null);
+                    const href = use ? (use.getAttribute('href') || use.getAttribute('xlink:href') || (use.href && use.href.baseVal) || '') : '';
+                    if (href.toLowerCase().includes('ico-weapon-' + key) || (selEl.getAttribute('name') || '').toLowerCase().includes('ico-weapon-' + key)) {
+                        return i;
+                    }
+                }
+                const imgs = document.querySelectorAll('.weapon_img');
+                for (let i = 0; i < imgs.length; i++) {
+                    if (imgs[i] === selEl || imgs[i].classList.contains('weapon_selected') || imgs[i].closest('.weapon_selected')) {
+                        return i;
+                    }
+                }
+            }
+        } catch (e) { }
 
-        // If player object has weapons array:
-        if (me.weapons && Array.isArray(me.weapons) && me.weapons.length > 1) {
-            let cur = me.weapons.indexOf(me[H.weapon] || me.weapon || me.Ha);
-            if (cur === -1) cur = currentGunIdx;
-            let next = (cur + delta + me.weapons.length) % me.weapons.length;
-            currentGunIdx = next;
+        // 2. Check Vue state
+        try {
+            const vd = unsafeWindow.vueData || window.vueData;
+            if (vd && typeof vd.classIdx === 'number') return vd.classIdx;
+            const va = unsafeWindow.vueApp || window.vueApp;
+            if (va && typeof va.classIdx === 'number') return va.classIdx;
+        } catch (e) { }
 
-            for (const fn of ['setWeapon', 'switchWeapon', 'changeWeapon', 'equipWeapon', 'selectWeapon']) {
-                if (typeof me[fn] === 'function') {
-                    try { me[fn](next); } catch (e) { }
+        // 3. Check in-game player object
+        try {
+            if (typeof ss !== 'undefined' && ss.MYPLAYER) {
+                const me = ss.MYPLAYER;
+                if (typeof me.weaponIdx === 'number') return me.weaponIdx;
+                if (typeof me.weaponIndex === 'number') return me.weaponIndex;
+                if (typeof me.classIdx === 'number') return me.classIdx;
+            }
+        } catch (e) { }
+
+        return currentGunIdx;
+    }
+
+    function selectGun(classIdx) {
+        classIdx = Math.max(0, Math.min(6, (classIdx % 7 + 7) % 7));
+        currentGunIdx = classIdx;
+        S.currentGun = String(classIdx);
+        save();
+
+        // 1. Click the DOM weapon icon in the "CHANGE YOUR WEAPON?" dialog
+        let domClicked = false;
+        try {
+            const targetKey = gunClassKeys[classIdx];
+
+            // A. SVG <use> tags referencing ico-weapon-<targetKey>
+            const uses = document.querySelectorAll('use');
+            for (const u of uses) {
+                const href = u.getAttribute('href') || u.getAttribute('xlink:href') || (u.href && u.href.baseVal) || '';
+                if (href.toLowerCase().includes('ico-weapon-' + targetKey)) {
+                    const btn = u.closest('.nospace') || u.closest('button') || u.closest('.weapon_img') || u.parentElement;
+                    if (btn) {
+                        btn.click();
+                        btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                        domClicked = true;
+                        break;
+                    }
                 }
             }
 
-            if (me.weapons[next]) {
-                if (H.weapon) me[H.weapon] = me.weapons[next];
-                if (me.weapon) me.weapon = me.weapons[next];
-                if (me.Ha) me.Ha = me.weapons[next];
+            // B. Direct name/href selectors
+            if (!domClicked) {
+                const iconSelectors = [
+                    `[name*="ico-weapon-${targetKey}"]`,
+                    `[href*="ico-weapon-${targetKey}"]`,
+                    `.ico-weapon-${targetKey}`
+                ];
+                for (const sel of iconSelectors) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        const btn = el.closest('.nospace') || el.closest('button') || el;
+                        btn.click();
+                        btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                        domClicked = true;
+                        break;
+                    }
+                }
             }
 
-            const name = me.weapons[next].name || gunNames[next] || `Gun #${next + 1}`;
-            showToast(`Gun: ${name}`);
-            return;
-        }
-
-        // Cycle through standard Shell Shockers 7 weapons
-        currentGunIdx = (currentGunIdx + delta + 7) % 7;
-        for (const fn of ['setWeapon', 'switchWeapon', 'changeWeapon', 'equipWeapon', 'selectWeapon']) {
-            if (typeof me[fn] === 'function') {
-                try { me[fn](currentGunIdx); } catch (e) { }
+            // C. Fallback: match by index among .weapon_img elements in the dialog
+            if (!domClicked) {
+                const imgs = document.querySelectorAll('.weapon_img');
+                if (imgs && imgs.length >= 7 && imgs[classIdx]) {
+                    const btn = imgs[classIdx].closest('.nospace') || imgs[classIdx];
+                    btn.click();
+                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    domClicked = true;
+                }
             }
-        }
-        if (typeof me.weaponIdx === 'number') me.weaponIdx = currentGunIdx;
-        if (typeof me.weaponIndex === 'number') me.weaponIndex = currentGunIdx;
-        if (typeof me.selectedWeapon === 'number') me.selectedWeapon = currentGunIdx;
+        } catch (e) { }
 
-        // Also trigger DOM weapon select if available
-        const gunButtons = document.querySelectorAll('.gun_box, .weapon-item, [data-weapon-id], #weaponSelect option');
-        if (gunButtons && gunButtons.length > currentGunIdx) {
-            try { gunButtons[currentGunIdx].click(); } catch (e) { }
-        }
+        // 2. Call Shell Shockers game engine extern.changeClass
+        try {
+            const ext = unsafeWindow.extern || window.extern;
+            if (ext && typeof ext.changeClass === 'function') {
+                ext.changeClass(classIdx);
+            }
+        } catch (e) { }
 
-        showToast(`Gun: ${gunNames[currentGunIdx] || ('#' + currentGunIdx)}`);
+        // 3. Update Vue.js app state and call onWeaponSelect if available
+        try {
+            const vd = unsafeWindow.vueData || window.vueData;
+            if (vd) vd.classIdx = classIdx;
+            const va = unsafeWindow.vueApp || window.vueApp;
+            if (va) {
+                va.classIdx = classIdx;
+                if (va.$refs) {
+                    if (va.$refs.weaponSelect && typeof va.$refs.weaponSelect.onWeaponSelect === 'function') {
+                        va.$refs.weaponSelect.onWeaponSelect(classIdx);
+                    }
+                    if (va.$refs.equipScreen && va.$refs.equipScreen.$refs && va.$refs.equipScreen.$refs.weapon_select) {
+                        va.$refs.equipScreen.$refs.weapon_select.selectClass(classIdx);
+                    }
+                }
+            }
+        } catch (e) { }
+
+        // 4. Update in-game player object if currently alive in match
+        try {
+            if (typeof ss !== 'undefined' && ss.MYPLAYER) {
+                const me = ss.MYPLAYER;
+                if (typeof me.changeClass === 'function') me.changeClass(classIdx);
+                if (typeof me.setWeapon === 'function') me.setWeapon(classIdx);
+                if (typeof me.switchWeapon === 'function') me.switchWeapon(classIdx);
+                if (typeof me.weaponIdx === 'number') me.weaponIdx = classIdx;
+                if (typeof me.weaponIndex === 'number') me.weaponIndex = classIdx;
+                if (typeof me.classIdx === 'number') me.classIdx = classIdx;
+            }
+        } catch (e) { }
+
+        // 5. Play UI click sound if available
+        try {
+            const bawk = unsafeWindow.BAWK || window.BAWK;
+            if (bawk && typeof bawk.play === 'function') bawk.play('ui_click');
+        } catch (e) { }
+
+        showToast(`🔫 Gun: ${gunDisplayNames[classIdx]}`);
     }
 
-    // Attach passive wheel listener to cycle guns
+    function cycleGun(delta) {
+        const cur = detectCurrentGun();
+        selectGun(cur + delta);
+    }
+
+    // Attach passive wheel listener to cycle guns (works on lobby screen AND in match!)
     window.addEventListener('wheel', e => {
         if (isUIElement(e.target)) return;
         if (panel) return;
         if (!S.wheelWeaponSwitch) return;
-        if (typeof ss === 'undefined' || !ss.MYPLAYER) return;
         const delta = e.deltaY > 0 ? 1 : -1;
         cycleGun(delta);
     }, { passive: true });
@@ -2491,6 +2613,9 @@
                 try {
                     S[key] = s.value;
                     save();
+                    if (key === 'currentGun') {
+                        selectGun(parseInt(s.value, 10));
+                    }
                 } catch (e) { }
             };
             d.appendChild(s);
@@ -2591,7 +2716,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.3</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.4</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2674,7 +2799,16 @@
 
             const pageCombat = tabPages.combat;
             check(pageCombat, 'Auto fire', 'autoFire');
-            check(pageCombat, 'Mouse wheel gun switch', 'wheelWeaponSwitch');
+            check(pageCombat, 'Mouse wheel / 1-7 gun switch', 'wheelWeaponSwitch');
+            select(pageCombat, 'Active Gun', 'currentGun', [
+                ['0', 'EggK-47 (Assault)'],
+                ['1', 'Scrambler (Shotgun)'],
+                ['2', 'Free Ranger (Sniper)'],
+                ['3', 'RPEGG (Rocket)'],
+                ['4', 'Whipper (SMG)'],
+                ['5', 'Crackshot (Bolt-Action)'],
+                ['6', 'Tri-Hard (Burst)']
+            ]);
             check(pageCombat, 'Lead prediction', 'prediction');
             range(pageCombat, 'Aim height', 'aimHeight', 0.1, 0.55, 0.05);
             range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
@@ -2844,5 +2978,5 @@
         } else setTimeout(boot, 100);
     };
     boot();
-    log('ST v3.3 loaded');
+    log('ST v3.4 loaded');
 })();

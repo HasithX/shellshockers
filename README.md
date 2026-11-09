@@ -1,12 +1,20 @@
-# Shell Shockers Aimbot & ESP (ST v3.3)
+# Shell Shockers Aimbot & ESP (ST v3.4)
 
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
-- **In-Game Mouse Wheel Weapon Switching (v3.3 Upgrade):**
-  - `Scroll Wheel Gun Switch`: Easily switch between all 7 weapons (**EggK-47**, **Scrambler**, **Free Ranger**, **RPEGG**, **Whipper**, **Crackshot**, **Tri-Hard**) in real-time by scrolling your mouse wheel up or down without leaving the game or pausing!
-  - `Fixed Countdown / Spawn Loop`: Completely removed the aggressive ad styles and premature pointer-lock interception that was causing the 5-second countdown to reset repeatedly back to the main menu.
-  - `Reliable Death Cursor Release`: Pointer lock cleanly releases only upon confirmed in-game elimination so you can click "Play Again" or "Respawn" smoothly.
+- **Instant 7-Gun Switcher (v3.4 Upgrade):**
+  - `Mouse Wheel Weapon Cycle`: Scroll your mouse wheel up or down anywhere (on the spawn screen, weapon dialog, or in-game) to cycle smoothly through all 7 weapons.
+  - `Number Keys 1 to 7`: Press keys `1` through `7` to instantly equip any specific gun:
+    - **1:** EggK-47 (Assault Rifle)
+    - **2:** Scrambler (Shotgun)
+    - **3:** Free Ranger (Semi-Auto Sniper)
+    - **4:** RPEGG (Rocket Launcher)
+    - **5:** Whipper (SMG)
+    - **6:** Crackshot (Bolt-Action Sniper)
+    - **7:** Tri-Hard (3-Burst Rifle)
+  - `Menu Dropdown Selector`: Choose your active weapon directly from the Combat tab in the cheat menu.
+  - `Synchronized Weapon Selection`: Interacts directly with Shell Shockers' `extern.changeClass` engine API, Vue state, and the "CHANGE YOUR WEAPON?" DOM buttons with real-time selection highlight.
 - **Auto-Respawn Cursor Fix & Quality-of-Life:**
   - `Spacious 3D Pill Navbar`: Redesigned 330px wide UI with distinct glowing pill navigation tabs, clear active/hover highlights, and spacious option padding.
   - `Sniper Zoom (Toggle & Hold)`: Upgraded zoom logic that activates instantly on `KeyC` (configurable), supporting both single-click Toggle and Hold actions.
@@ -47,7 +55,7 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ### 1-Click Install / Update
 If you have **Violentmonkey** or **Tampermonkey** installed, open this link in your browser:
-👉 **[Install ST v3.3](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
+👉 **[Install ST v3.4](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
 
 The extension will pop up with an **Install** or **Update** button. Click it, then refresh Shell Shockers.
 
@@ -58,10 +66,11 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 4. Save and reload `https://shellshock.io/`.
 
 ## 🎮 Controls
+- **Change Gun:** Scroll **Mouse Wheel** OR press **`1` - `7`**
+  - `1`: EggK-47 | `2`: Scrambler | `3`: Free Ranger | `4`: RPEGG | `5`: Whipper | `6`: Crackshot | `7`: Tri-Hard
+- **Sniper Zoom (Binoculars):** Click or hold `C` (configurable in Combat tab)
 - **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `ST` button)
 - **Aim Key:** Hold `Right Mouse Button` (Mouse2)
-- **Sniper Zoom (Binoculars):** Click or hold `C` (configurable in Combat tab)
-- **Switch Gun:** Scroll `Mouse Wheel Up / Down`
 - **Save Safe Point:** `G`
 - **Teleport to Nearest Safe Point:** `H`
 

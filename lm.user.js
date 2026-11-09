@@ -84,8 +84,10 @@
         killAllKey: 'KeyV',
         killAllLimit: 10,
         killAllRange: 120,
+        killAllMode: 'sequence',
         killAllSwitchToRpegg: true,
         killAllKeepAim: false,
+        autoAcceptTeamSwitch: false,
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -154,7 +156,8 @@
             killAll();
             return;
         }
-        if (e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || e.key.toLowerCase() === 'c') {
+        const isKeyC = (e.key && typeof e.key.toLowerCase === 'function' && e.key.toLowerCase() === 'c');
+        if (e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || isKeyC) {
             if (S.zoomMode === 'toggle') {
                 zoomToggled = !zoomToggled;
                 showToast(zoomToggled ? '🔭 Sniper Zoom: ON (25°)' : '🔭 Sniper Zoom: OFF');
@@ -178,7 +181,8 @@
 
     const onKeyUpUI = e => {
         keys.delete(e.code);
-        if ((e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || e.key.toLowerCase() === 'c') && S.zoomMode === 'hold') {
+        const isKeyC = (e.key && typeof e.key.toLowerCase === 'function' && e.key.toLowerCase() === 'c');
+        if ((e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || isKeyC) && S.zoomMode === 'hold') {
             showToast('🔭 Sniper Zoom: Released');
         }
     };
@@ -459,72 +463,35 @@
         return currentGunIdx;
     }
 
+    function isPlayerAliveInMatch() {
+        if (typeof ss === 'undefined' || !ss.MYPLAYER) return false;
+        const me = ss.MYPLAYER;
+        const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : (typeof me.hp === 'number' ? me.hp : 100));
+        return !!(me[H.playing] && myHp > 0);
+    }
+
     function selectGun(classIdx) {
         classIdx = Math.max(0, Math.min(6, (classIdx % 7 + 7) % 7));
         currentGunIdx = classIdx;
         S.currentGun = String(classIdx);
         save();
 
-        // 1. Click the DOM weapon icon in the "CHANGE YOUR WEAPON?" dialog
-        let domClicked = false;
-        try {
-            const targetKey = gunClassKeys[classIdx];
+        const alive = isPlayerAliveInMatch();
+        if (alive) {
+            // When alive in a match: ONLY queue the weapon for next spawn.
+            // Absolutely NEVER click background DOM or call changeClass mid-life,
+            // which causes the "SWITCH TO TEAM" modal to popup and freeze controls!
+            try {
+                const vd = unsafeWindow.vueData || window.vueData;
+                if (vd) vd.classIdx = classIdx;
+                const va = unsafeWindow.vueApp || window.vueApp;
+                if (va) va.classIdx = classIdx;
+            } catch (e) { }
+            showToast(`🔫 Next Spawn: ${gunDisplayNames[classIdx]} (Press [K] to Re-deploy)`);
+            return;
+        }
 
-            // A. SVG <use> tags referencing ico-weapon-<targetKey>
-            const uses = document.querySelectorAll('use');
-            for (const u of uses) {
-                const href = u.getAttribute('href') || u.getAttribute('xlink:href') || (u.href && u.href.baseVal) || '';
-                if (href.toLowerCase().includes('ico-weapon-' + targetKey)) {
-                    const btn = u.closest('.nospace') || u.closest('button') || u.closest('.weapon_img') || u.parentElement;
-                    if (btn) {
-                        btn.click();
-                        btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                        domClicked = true;
-                        break;
-                    }
-                }
-            }
-
-            // B. Direct name/href selectors
-            if (!domClicked) {
-                const iconSelectors = [
-                    `[name*="ico-weapon-${targetKey}"]`,
-                    `[href*="ico-weapon-${targetKey}"]`,
-                    `.ico-weapon-${targetKey}`
-                ];
-                for (const sel of iconSelectors) {
-                    const el = document.querySelector(sel);
-                    if (el) {
-                        const btn = el.closest('.nospace') || el.closest('button') || el;
-                        btn.click();
-                        btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                        domClicked = true;
-                        break;
-                    }
-                }
-            }
-
-            // C. Fallback: match by index among .weapon_img elements in the dialog
-            if (!domClicked) {
-                const imgs = document.querySelectorAll('.weapon_img');
-                if (imgs && imgs.length >= 7 && imgs[classIdx]) {
-                    const btn = imgs[classIdx].closest('.nospace') || imgs[classIdx];
-                    btn.click();
-                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                    domClicked = true;
-                }
-            }
-        } catch (e) { }
-
-        // 2. Call Shell Shockers game engine extern.changeClass
-        try {
-            const ext = unsafeWindow.extern || window.extern;
-            if (ext && typeof ext.changeClass === 'function') {
-                ext.changeClass(classIdx);
-            }
-        } catch (e) { }
-
-        // 3. Update Vue.js app state and call onWeaponSelect if available
+        // On lobby, death, or respawn screen: cleanly apply weapon choice
         try {
             const vd = unsafeWindow.vueData || window.vueData;
             if (vd) vd.classIdx = classIdx;
@@ -542,31 +509,38 @@
             }
         } catch (e) { }
 
-        // 4. Update in-game player object if currently alive in match
         try {
-            if (typeof ss !== 'undefined' && ss.MYPLAYER) {
-                const me = ss.MYPLAYER;
-                if (typeof me.changeClass === 'function') me.changeClass(classIdx);
-                if (typeof me.setWeapon === 'function') me.setWeapon(classIdx);
-                if (typeof me.switchWeapon === 'function') me.switchWeapon(classIdx);
-                if (typeof me.weaponIdx === 'number') me.weaponIdx = classIdx;
-                if (typeof me.weaponIndex === 'number') me.weaponIndex = classIdx;
-                if (typeof me.classIdx === 'number') me.classIdx = classIdx;
+            const ext = unsafeWindow.extern || window.extern;
+            if (ext && typeof ext.changeClass === 'function') {
+                ext.changeClass(classIdx);
             }
         } catch (e) { }
 
-        // 5. Play UI click sound if available
+        // Strictly scoped DOM click inside #weapon_select without bubbling to team switch
+        try {
+            const weaponGrid = document.querySelector('#weapon_select .weapon-grid, #weapon_select');
+            if (weaponGrid) {
+                const targetKey = gunClassKeys[classIdx];
+                const items = weaponGrid.querySelectorAll('.nospace, .weapon_img');
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.classList.contains('btn_team_switch') || item.closest('.btn_team_switch')) continue;
+                    const html = (item.innerHTML || '') + ' ' + (item.getAttribute('name') || '');
+                    if (html.toLowerCase().includes(targetKey) || i === classIdx) {
+                        item.dispatchEvent(new MouseEvent('click', { bubbles: false, cancelable: true, view: window }));
+                        if (typeof item.click === 'function') item.click();
+                        break;
+                    }
+                }
+            }
+        } catch (e) { }
+
         try {
             const bawk = unsafeWindow.BAWK || window.BAWK;
             if (bawk && typeof bawk.play === 'function') bawk.play('ui_click');
         } catch (e) { }
 
-        const inMatch = typeof ss !== 'undefined' && ss.MYPLAYER && ss.MYPLAYER[H.playing];
-        if (inMatch) {
-            showToast(`🔫 Next Spawn: ${gunDisplayNames[classIdx]} (Press [K] to Re-deploy)`);
-        } else {
-            showToast(`🔫 Gun Selected: ${gunDisplayNames[classIdx]}`);
-        }
+        showToast(`🔫 Gun Selected: ${gunDisplayNames[classIdx]}`);
     }
 
     function quickRespawn() {
@@ -595,18 +569,46 @@
         }, 250);
     }
 
-    function cycleGun(delta) {
-        const cur = detectCurrentGun();
-        selectGun(cur + delta);
+    function isEquipScreenOpen() {
+        if (isPlayerAliveInMatch()) return false;
+        try {
+            const va = unsafeWindow.vueApp || window.vueApp;
+            if (va && va.screens) {
+                if (va.showScreen === va.screens.home || va.showScreen === va.screens.equip) return true;
+                if (va.isRespawning || (va.game && va.game.isPaused)) return true;
+                if (va.showScreen === va.screens.game) return false;
+            }
+        } catch (e) { }
+
+        try {
+            if (!document.pointerLockElement) {
+                const respawnBtn = document.querySelector('#respawnBtn, #playSection, .btn-respawn');
+                if (respawnBtn && (respawnBtn.offsetParent !== null || window.getComputedStyle(respawnBtn).display !== 'none')) return true;
+            }
+        } catch (e) { }
+        return false;
     }
 
-    // Attach passive wheel listener to cycle guns (works on lobby screen AND in match!)
+    let wheelDebounceTimer = null;
     window.addEventListener('wheel', e => {
         if (isUIElement(e.target)) return;
         if (panel) return;
         if (!S.wheelWeaponSwitch) return;
         const delta = e.deltaY > 0 ? 1 : -1;
-        cycleGun(delta);
+        if (wheelDebounceTimer) clearTimeout(wheelDebounceTimer);
+        wheelDebounceTimer = setTimeout(() => {
+            const cur = detectCurrentGun();
+            const nextIdx = (cur + delta + 7) % 7;
+            currentGunIdx = nextIdx;
+            S.currentGun = String(nextIdx);
+            save();
+
+            if (isEquipScreenOpen()) {
+                selectGun(nextIdx);
+            } else {
+                showToast(`🔫 Next respawn weapon: ${gunNames[nextIdx] || nextIdx}`);
+            }
+        }, 120);
     }, { passive: true });
 
     function restorePointerLock() {
@@ -1482,8 +1484,12 @@
 
     // ================= TELEPORT (sustained write, all mirrors) =================
     let tpTarget = null;
+    let tpStartPos = null;
+    let tpStartDist = 0;
     let tpUntil = 0;
-    let tpStartDist = Infinity;
+    let tpMovedDist = 0;
+    let tpSampleInterval = null;
+    let tpRetryCb = null;
     let tpLogged = false;
     let teleportTargetPos = null;
     let teleportDriveUntil = 0;
@@ -1531,16 +1537,39 @@
         } catch (e) { }
     }
 
-    function startTeleport(x, y, z) {
+    function startTeleport(x, y, z, onRetry) {
         const me = ss.MYPLAYER;
         if (!me) return;
         tpTarget = { x, y, z };
         teleportTargetPos = { x, y, z };
+        tpStartPos = { x: me[H.x], y: me[H.y], z: me[H.z] };
         teleportDriveUntil = Date.now() + (S.teleportMs || 800);
         tpUntil = Date.now() + (S.teleportMs || 800);
         tpStartDist = Math.hypot(x - me[H.x], y - me[H.y], z - me[H.z]);
-        tpLogged = false;
+        tpMovedDist = 0;
+        tpRetryCb = onRetry;
         lastTargetPlayer = null;
+
+        if (tpSampleInterval) clearInterval(tpSampleInterval);
+        let sampleCount = 0;
+        tpSampleInterval = setInterval(() => {
+            sampleCount++;
+            if (typeof ss !== 'undefined' && ss.MYPLAYER && tpStartPos) {
+                const cur = ss.MYPLAYER;
+                tpMovedDist = Math.hypot(cur[H.x] - tpStartPos.x, cur[H.y] - tpStartPos.y, cur[H.z] - tpStartPos.z);
+            }
+            if (sampleCount >= 9) {
+                clearInterval(tpSampleInterval);
+                tpSampleInterval = null;
+                if (tpMovedDist < 1.5 && typeof tpRetryCb === 'function') {
+                    log('teleport ineffective, retrying');
+                    showToast(`⚠️ TP ineffective (${tpMovedDist.toFixed(1)}m), retrying...`);
+                    const cb = tpRetryCb;
+                    tpRetryCb = null;
+                    cb();
+                }
+            }
+        }, 100);
     }
 
     function applyTeleport(me) {
@@ -1563,7 +1592,7 @@
         }
     }
 
-    function gotoNearestPoint() {
+    function gotoNearestPoint(retryIdx) {
         if (!ss.MYPLAYER) {
             showToast('Cannot teleport: not in match');
             return;
@@ -1575,25 +1604,24 @@
                 showToast('No saved safe points found');
                 return;
             }
-            let nearest = null;
-            let nearestDist = Infinity;
-            let nearestIdx = -1;
-            // Prefer points further than 1.5m so we do not teleport to where we are already standing
             let candidatePts = pts.filter(pt => Math.hypot(pt.x - me[H.x], pt.y - me[H.y], pt.z - me[H.z]) > 1.5);
-            if (candidatePts.length === 0) candidatePts = pts;
-            candidatePts.forEach((pt) => {
-                const idx = pts.indexOf(pt);
-                const dist = Math.hypot(pt.x - me[H.x], pt.y - me[H.y], pt.z - me[H.z]);
-                if (dist < nearestDist) {
-                    nearestDist = dist;
-                    nearest = pt;
-                    nearestIdx = idx + 1;
+            if (candidatePts.length === 0) candidatePts = pts.slice();
+            candidatePts.sort((a, b) => {
+                const da = Math.hypot(a.x - me[H.x], a.y - me[H.y], a.z - me[H.z]);
+                const db = Math.hypot(b.x - me[H.x], b.y - me[H.y], b.z - me[H.z]);
+                return da - db;
+            });
+            const pickIdx = (typeof retryIdx === 'number' && retryIdx < candidatePts.length) ? retryIdx : 0;
+            const targetPt = candidatePts[pickIdx] || candidatePts[0];
+            const dist = Math.hypot(targetPt.x - me[H.x], targetPt.y - me[H.y], targetPt.z - me[H.z]);
+            const ptIdx = pts.indexOf(targetPt) + 1;
+            startTeleport(targetPt.x, targetPt.y, targetPt.z, () => {
+                if (candidatePts.length > 1) {
+                    log('teleport ineffective, retrying with next spot');
+                    gotoNearestPoint((pickIdx + 1) % candidatePts.length);
                 }
             });
-            if (nearest) {
-                startTeleport(nearest.x, nearest.y, nearest.z);
-                showToast(`Teleporting to Point #${nearestIdx} (${nearestDist.toFixed(1)}m)`);
-            }
+            showToast(`Teleporting to Point #${ptIdx} (${dist.toFixed(1)}m)`);
         } catch (e) {
             showToast('Teleport failed');
         }
@@ -2015,7 +2043,7 @@
         if (statsHud) { try { statsHud.remove(); } catch (e) { } }
         statsHud = document.createElement('div');
         statsHud.id = 'st-stats-widget';
-        statsHud.style.cssText = 'position:fixed;top:12px;left:12px;z-index:2147483500;pointer-events:none;background:rgba(10,18,30,.88);border:1px solid rgba(0,180,216,.45);border-radius:8px;padding:6px 12px;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;color:#e2e8f0;display:flex;align-items:center;gap:12px;box-shadow:0 4px 18px rgba(0,0,0,.6), 0 0 10px rgba(0,180,216,.2);user-select:none;transition:opacity .2s ease';
+        statsHud.style.cssText = 'position:fixed;bottom:56px;left:16px;z-index:2147483500;pointer-events:none;background:rgba(10,18,30,.88);border:1px solid rgba(0,180,216,.45);border-radius:8px;padding:6px 12px;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;color:#e2e8f0;display:flex;align-items:center;gap:12px;box-shadow:0 4px 18px rgba(0,0,0,.6), 0 0 10px rgba(0,180,216,.2);user-select:none;transition:opacity .2s ease';
         document.body.appendChild(statsHud);
         return statsHud;
     }
@@ -2139,6 +2167,13 @@
     function killAll(opts) {
         opts = opts || {};
         if (typeof ss === 'undefined' || !ss.MYPLAYER || !S.enabled || killAllBusy) return;
+
+        if (dialogDetected) {
+            pendingKillAll = true;
+            showToast('⚠️ KILL ALL queued (waiting for dialog)');
+            return;
+        }
+
         const me = ss.MYPLAYER;
         const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
         if (!me[H.playing] || myHp <= 0) {
@@ -2146,13 +2181,20 @@
             return;
         }
 
+        const curGun = detectCurrentGun();
+        if (curGun !== 3) {
+            showToast('⚠️ KILL ALL requires RPEGG (Gun 4) - Equip RPEGG first!');
+            log(`KILL ALL aborted: active weapon is ${curGun} (${gunNames[curGun] || '?'}), not 3 (RPEGG)`);
+            return;
+        }
+
         killAllBusy = true;
         const t0 = performance.now();
-        let shotCount = 0;
+        const listenersDown = fireDown.length;
+        const listenersUp = fireUp.length;
 
         try {
-            // Target search with generous default range (250m)
-            const maxRange = (typeof S.killAllRange === 'number' && S.killAllRange > 0) ? S.killAllRange : 250;
+            const maxRange = (typeof S.killAllRange === 'number' && S.killAllRange > 0) ? S.killAllRange : 120;
             const limit = (typeof S.killAllLimit === 'number') ? S.killAllLimit : 10;
             const myTeam = (typeof me.team === 'number') ? me.team : 0;
 
@@ -2179,12 +2221,10 @@
                 return;
             }
 
-            showToast(`💥 KILL ALL: Striking ${selected.length} enemies...`);
-
             const origYaw = me[H.yaw];
             const origPitch = me[H.pitch];
+            const keepAim = (opts && opts.keepAim !== undefined) ? opts.keepAim : S.killAllKeepAim;
 
-            // Helper to refill ammo & clear weapon cooldowns on active weapon
             function prepWeapon() {
                 try {
                     const curWp = me[H.weapon] || (me.weapons && me.weapons[me.weaponIdx || 0]) || (me.weapons && me.weapons[0]) || me.weapon;
@@ -2213,51 +2253,85 @@
                 } catch (e) { }
             }
 
-            // Rapid-fire sequence: holds each shot for 35ms so game tick registers the packet, then advances
-            let idx = 0;
-            function strikeNext() {
-                if (idx >= selected.length) {
-                    const keepAim = (opts && opts.keepAim !== undefined) ? opts.keepAim : S.killAllKeepAim;
-                    if (!keepAim) {
-                        me[H.yaw] = origYaw;
-                        me[H.pitch] = origPitch;
+            const sk = getShootingKey(me);
+            let triggerFlipped = false;
+
+            if (S.killAllMode === 'burst') {
+                let dispatched = 0;
+                for (let i = 0; i < selected.length; i++) {
+                    try {
+                        const target = selected[i].P;
+                        const a = anglesTo(target, me);
+                        me[H.yaw] = a.yaw;
+                        me[H.pitch] = a.pitch;
                         if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
-                            yawpitch.setToYawPitch(origYaw, origPitch);
+                            yawpitch.setToYawPitch(a.yaw, a.pitch);
                         }
-                    }
-                    fireEvent(false);
-                    killAllBusy = false;
-                    const elapsed = (performance.now() - t0).toFixed(0);
-                    showToast(`🎯 KILL ALL: ${shotCount} shots landed in ${elapsed}ms!`);
-                    log(`KILL ALL completed: ${shotCount} shots in ${elapsed} ms`);
-                    return;
-                }
-
-                try {
-                    const target = selected[idx].P;
-                    const a = anglesTo(target, me);
-                    me[H.yaw] = a.yaw;
-                    me[H.pitch] = a.pitch;
-                    if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
-                        yawpitch.setToYawPitch(a.yaw, a.pitch);
-                    }
-
-                    prepWeapon();
-                    fireEvent(true);
-                    shotCount++;
-
-                    setTimeout(() => {
+                        prepWeapon();
+                        const prevTrig = sk ? !!me[sk] : false;
+                        fireEvent(true);
+                        if (sk && me[sk] !== prevTrig) triggerFlipped = true;
                         fireEvent(false);
-                        idx++;
-                        setTimeout(strikeNext, 15);
-                    }, 35);
-                } catch (err) {
-                    idx++;
-                    setTimeout(strikeNext, 10);
+                        dispatched++;
+                    } catch (e) { }
                 }
-            }
+                if (!keepAim) {
+                    me[H.yaw] = origYaw;
+                    me[H.pitch] = origPitch;
+                    if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                        yawpitch.setToYawPitch(origYaw, origPitch);
+                    }
+                }
+                killAllBusy = false;
+                const elapsed = (performance.now() - t0).toFixed(0);
+                log(`KILL ALL (burst): listeners=${listenersDown}/${listenersUp}, triggerFlipped=${triggerFlipped}, dispatched=${dispatched}/${selected.length}, elapsed=${elapsed}ms`);
+                showToast(`🎯 KILL ALL (burst): ${dispatched} fired in ${elapsed}ms | L:${listenersDown} T:${triggerFlipped ? 'OK' : 'ERR'}`);
+            } else {
+                let idx = 0;
+                let dispatched = 0;
+                function strikeNext() {
+                    if (idx >= selected.length) {
+                        if (!keepAim) {
+                            me[H.yaw] = origYaw;
+                            me[H.pitch] = origPitch;
+                            if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                                yawpitch.setToYawPitch(origYaw, origPitch);
+                            }
+                        }
+                        fireEvent(false);
+                        killAllBusy = false;
+                        const elapsed = (performance.now() - t0).toFixed(0);
+                        log(`KILL ALL (sequence): listeners=${listenersDown}/${listenersUp}, triggerFlipped=${triggerFlipped}, dispatched=${dispatched}/${selected.length}, elapsed=${elapsed}ms`);
+                        showToast(`🎯 KILL ALL (seq): ${dispatched} fired in ${elapsed}ms | L:${listenersDown} T:${triggerFlipped ? 'OK' : 'ERR'}`);
+                        return;
+                    }
 
-            strikeNext();
+                    try {
+                        const target = selected[idx].P;
+                        const a = anglesTo(target, me);
+                        me[H.yaw] = a.yaw;
+                        me[H.pitch] = a.pitch;
+                        if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                            yawpitch.setToYawPitch(a.yaw, a.pitch);
+                        }
+                        prepWeapon();
+                        const prevTrig = sk ? !!me[sk] : false;
+                        fireEvent(true);
+                        if (sk && me[sk] !== prevTrig) triggerFlipped = true;
+                        dispatched++;
+
+                        setTimeout(() => {
+                            fireEvent(false);
+                            idx++;
+                            setTimeout(strikeNext, 16);
+                        }, 16);
+                    } catch (err) {
+                        idx++;
+                        setTimeout(strikeNext, 16);
+                    }
+                }
+                strikeNext();
+            }
         } catch (e) {
             log('KILL ALL error:', e);
             killAllBusy = false;
@@ -2310,12 +2384,197 @@
     let frameErrorLogged = false;
     let cachedActorPlayer = null;
     let origCamFov = null;
+    let lastCam = null;
     let lastTargetPlayer = null;
+
+    const dismissedDialogs = new WeakSet();
+    let activeDialogNode = null;
+    let dialogFirstSeen = 0;
+    let dialogPollTimer = null;
+    let dialogDetected = false;
+    let pendingKillAll = false;
+    let pendingEscape = null;
+
+    function findTeamDialog() {
+        const candidates = document.querySelectorAll('div, form, section, [class*="modal"], [class*="dialog"], [class*="popup"]');
+        for (let i = 0; i < candidates.length; i++) {
+            const el = candidates[i];
+            if (dismissedDialogs.has(el)) continue;
+            const txt = (el.textContent || '');
+            if (txt.includes('SWITCH TO TEAM') || txt.includes('Your score will be reset')) {
+                let dlg = el;
+                while (dlg && dlg.parentElement && dlg.parentElement !== document.body && dlg.parentElement !== document.documentElement) {
+                    const pt = dlg.parentElement.textContent || '';
+                    if (!pt.includes('SWITCH TO TEAM') && !pt.includes('Your score will be reset')) break;
+                    if (dlg.parentElement.children.length > 6) break;
+                    dlg = dlg.parentElement;
+                }
+                if (!dismissedDialogs.has(dlg)) return dlg;
+            }
+        }
+        return null;
+    }
+
+    function clickDialogChoice(dlg, choice) {
+        const btns = dlg.querySelectorAll('button, a, div[role="button"], input[type="button"], [class*="btn"]');
+        for (let i = 0; i < btns.length; i++) {
+            const b = btns[i];
+            const t = (b.textContent || b.value || '').trim().toLowerCase();
+            if (t === choice.toLowerCase() || t.startsWith(choice.toLowerCase())) {
+                try {
+                    b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    b.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                    b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    if (typeof b.click === 'function') b.click();
+                } catch (e) { }
+                return true;
+            }
+        }
+        const all = dlg.querySelectorAll('*');
+        for (let i = 0; i < all.length; i++) {
+            const el = all[i];
+            if (el.children.length === 0 && (el.textContent || '').trim().toLowerCase() === choice.toLowerCase()) {
+                try {
+                    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    if (typeof el.click === 'function') el.click();
+                } catch (e) { }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function flushQueuedActions() {
+        if (pendingKillAll) {
+            pendingKillAll = false;
+            killAll();
+        }
+        if (pendingEscape) {
+            const spot = pendingEscape;
+            pendingEscape = null;
+            startTeleport(spot.x, spot.y, spot.z);
+        }
+    }
+
+    function hookTeamSwitchProtection() {
+        try {
+            const va = unsafeWindow.vueApp || window.vueApp;
+            if (va) {
+                if (typeof va.onSwitchTeamClicked === 'function' && !va.onSwitchTeamClicked.__stHooked) {
+                    const origSwitch = va.onSwitchTeamClicked;
+                    va.onSwitchTeamClicked = function () {
+                        if (isPlayerAliveInMatch()) {
+                            log('Suppressed accidental onSwitchTeamClicked while in-game');
+                            return;
+                        }
+                        return origSwitch.apply(this, arguments);
+                    };
+                    va.onSwitchTeamClicked.__stHooked = true;
+                }
+
+                if (va.$refs && va.$refs.switchTeamPopup && typeof va.$refs.switchTeamPopup.show === 'function' && !va.$refs.switchTeamPopup.show.__stHooked) {
+                    const origShow = va.$refs.switchTeamPopup.show;
+                    va.$refs.switchTeamPopup.show = function () {
+                        if (isPlayerAliveInMatch()) {
+                            log('Suppressed accidental switchTeamPopup.show while in-game');
+                            return;
+                        }
+                        return origShow.apply(this, arguments);
+                    };
+                    va.$refs.switchTeamPopup.show.__stHooked = true;
+                }
+            }
+        } catch (e) { }
+    }
+
+    function dialogWatchdog(me) {
+        try {
+            hookTeamSwitchProtection();
+            const dlg = findTeamDialog();
+            if (dlg) {
+                dialogDetected = true;
+                const alive = isPlayerAliveInMatch();
+                // If the player is currently alive in match, this modal is an unwanted interruption:
+                // Dismiss it IMMEDIATELY (0ms delay) and re-lock mouse pointer!
+                const waitTime = alive ? 0 : 1200;
+                if (activeDialogNode !== dlg) {
+                    activeDialogNode = dlg;
+                    dialogFirstSeen = Date.now();
+                }
+                if (Date.now() - dialogFirstSeen >= waitTime) {
+                    const choice = S.autoAcceptTeamSwitch ? 'Yes' : 'No';
+                    clickDialogChoice(dlg, choice);
+
+                    // Force hide it immediately so it doesn't freeze display
+                    try {
+                        dlg.style.display = 'none';
+                        dlg.style.pointerEvents = 'none';
+                    } catch (e) { }
+
+                    if (!dialogPollTimer) {
+                        const targetNode = dlg;
+                        const pollStart = Date.now();
+                        dialogPollTimer = setInterval(() => {
+                            const stillOpen = document.body && document.body.contains(targetNode) &&
+                                (targetNode.offsetWidth > 0 || targetNode.offsetHeight > 0);
+                            const timedOut = Date.now() - pollStart > 500;
+                            if (!stillOpen || timedOut) {
+                                clearInterval(dialogPollTimer);
+                                dialogPollTimer = null;
+                                dismissedDialogs.add(targetNode);
+                                if (activeDialogNode === targetNode) activeDialogNode = null;
+                                dialogDetected = false;
+
+                                const canvas = document.getElementById('canvas') || document.querySelector('canvas');
+                                if (canvas && typeof canvas.requestPointerLock === 'function') {
+                                    try { canvas.requestPointerLock(); } catch (e) { }
+                                }
+                                lastShotAt = 0;
+                                showToast('dialog auto-dismissed');
+                                flushQueuedActions();
+                            }
+                        }, 50);
+                    }
+                }
+            } else {
+                dialogDetected = false;
+            }
+        } catch (e) { }
+    }
 
     createAnonFunction("LIBERTYMUTUAL", function () {
         try {
             gameLoaded = true;
             ss.PLAYERS.forEach(P => { if (P && P.hasOwnProperty("ws")) ss.MYPLAYER = P; });
+            dialogWatchdog(ss.MYPLAYER);
+
+            if (ss.SCENE) {
+                if (ss.SCENE.activeCamera !== lastCam) {
+                    lastCam = ss.SCENE.activeCamera;
+                    origCamFov = null;
+                }
+                const cam = ss.SCENE.activeCamera;
+                if (cam && origCamFov === null && typeof cam.fov === 'number') {
+                    origCamFov = cam.fov;
+                }
+                const me = ss.MYPLAYER;
+                const isScoped = !!(me && (me.isScoped || me.scoped || me.zoomed || me.isZoomed ||
+                    (H.scoped && me[H.scoped]) || (H.isScoped && me[H.isScoped]) ||
+                    (me[H.weapon] && (me[H.weapon].isScoped || me[H.weapon].scoped))));
+                const isZoomHeld = keys.has(S.zoomKey || 'KeyC') || keys.has('KeyC') || keys.has('Keyc');
+                const isZooming = S.sniperZoom && (S.zoomMode === 'toggle' ? zoomToggled : (zoomToggled || isZoomHeld));
+                if (cam) {
+                    if (isZooming) {
+                        cam.fov = (S.zoomFov || 25) * DEG;
+                    } else if (!isScoped) {
+                        const targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
+                        cam.fov = targetFov;
+                    }
+                }
+            }
+
             if (!ss.MYPLAYER || !ss.SCENE || !ss.SCENE.activeCamera) return;
 
             if (ss.MYPLAYER !== cachedActorPlayer || !H.actor) {
@@ -2359,13 +2618,6 @@
 
             yawpitch.magicValue = 0.0025 * Math.max(0.15, S.smooth);
 
-            if (origCamFov === null && typeof cam.fov === 'number') {
-                origCamFov = cam.fov;
-            }
-            const isScoped = !!(me.isScoped || me.scoped || me.zoomed || me.isZoomed ||
-                (H.scoped && me[H.scoped]) || (H.isScoped && me[H.isScoped]) ||
-                (me[H.weapon] && (me[H.weapon].isScoped || me[H.weapon].scoped)));
-
             // Release pointer lock on death transition so player can freely click Play/Respawn!
             const myHpVal = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
             const isMeAlive = !!me[H.playing] && myHpVal > 0;
@@ -2375,22 +2627,14 @@
                 if (document.pointerLockElement) {
                     try { document.exitPointerLock(); } catch (e) { }
                 }
+                // When death screen appears, apply the queued weapon choice!
+                setTimeout(() => {
+                    if (currentGunIdx !== null && currentGunIdx !== undefined) {
+                        selectGun(currentGunIdx);
+                    }
+                }, 100);
             } else if (!wasAlive && isMeAlive) {
                 wasAlive = true;
-            }
-
-            // Sniper Zoom (prioritized so it works regardless of isScoped glitches)
-            const isZoomHeld = keys.has(S.zoomKey || 'KeyC') || keys.has('KeyC') || keys.has('Keyc');
-            const isZooming = S.sniperZoom && (S.zoomMode === 'toggle' ? zoomToggled : (zoomToggled || isZoomHeld));
-
-            if (isZooming) {
-                const targetFov = (S.zoomFov || 25) * DEG;
-                cam.fov = targetFov;
-            } else if (!isScoped) {
-                const targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
-                if (Math.abs(cam.fov - targetFov) > 0.005) {
-                    cam.fov += (targetFov - cam.fov) * 0.4;
-                }
             }
 
             const cross = new BABYLON.Vector3();
@@ -2601,7 +2845,7 @@
                 wantFire = false;
             } else if (!S.autoFire) {
                 wantFire = false;
-            } else if (panel && !S.autoFireWhenMenuOpen) {
+            } else if ((panel || dialogDetected) && !S.autoFireWhenMenuOpen) {
                 wantFire = false;
             } else if (!autoFireEnemy) {
                 wantFire = false;
@@ -2641,8 +2885,10 @@
                 const activeTgt = autoFireEnemy || target;
                 const tgtStr = activeTgt ? (activeTgt.ang / DEG).toFixed(1) + '°' : '-';
                 const fireState = !S.autoFire ? 'OFF' : (firing ? 'FIRING' : (autoFireEnemy ? 'LOCKED' : 'READY'));
+                const fovDeg = (cam && typeof cam.fov === 'number') ? (cam.fov / DEG).toFixed(0) : '-';
+                const escStr = tpMovedDist > 0 ? `${escReason} (${tpMovedDist.toFixed(1)}m)` : escReason;
                 statusEl.textContent =
-                    `tgt ${tgtStr} | fire ${fireState} | ${ammoStatusStr} | ${healthStatusStr} | esc ${escReason}`;
+                    `tgt ${tgtStr} | fire ${fireState} | fov ${fovDeg}° | ${ammoStatusStr} | ${healthStatusStr} | esc ${escStr}`;
             }
 
             for (let i = ESPArray.length - 1; i >= 0; i--) {
@@ -3107,6 +3353,7 @@
 
             const pageMisc = tabPages.misc;
             check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
+            check(pageMisc, 'Auto accept team switch', 'autoAcceptTeamSwitch');
             check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
             range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
             check(pageMisc, 'Hold max health', 'holdHealth');
@@ -3133,6 +3380,7 @@
                 });
             });
 
+            select(pageKill, 'Firing mode', 'killAllMode', [['sequence', 'Sequence (~16ms)'], ['burst', 'Burst (1 frame)']]);
             range(pageKill, 'Max targets', 'killAllLimit', 1, 20, 1);
             range(pageKill, 'Max range (m)', 'killAllRange', 20, 200, 5);
             check(pageKill, 'Auto-switch to RPEGG', 'killAllSwitchToRpegg');

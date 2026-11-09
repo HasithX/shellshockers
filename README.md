@@ -1,11 +1,13 @@
-# Shell Shockers Aimbot & ESP (ST v3.2)
+# Shell Shockers Aimbot & ESP (ST v3.3)
 
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
-- **Auto-Respawn Cursor Fix & Quality-of-Life (v3.2 Upgrade):**
-  - `Dead/Respawn Mouse Release`: Automatically exits HTML5 pointer lock when you get eliminated, allowing you to freely click "Play Again", "Respawn", or change loadouts without having to open the cheat menu.
-  - `Built-in AdBlocker`: Automatically hides and silences Shell Shockers video ads, pre-rolls, mid-rolls, and banners so matches load fast with zero FPS drops.
+- **In-Game Mouse Wheel Weapon Switching (v3.3 Upgrade):**
+  - `Scroll Wheel Gun Switch`: Easily switch between all 7 weapons (**EggK-47**, **Scrambler**, **Free Ranger**, **RPEGG**, **Whipper**, **Crackshot**, **Tri-Hard**) in real-time by scrolling your mouse wheel up or down without leaving the game or pausing!
+  - `Fixed Countdown / Spawn Loop`: Completely removed the aggressive ad styles and premature pointer-lock interception that was causing the 5-second countdown to reset repeatedly back to the main menu.
+  - `Reliable Death Cursor Release`: Pointer lock cleanly releases only upon confirmed in-game elimination so you can click "Play Again" or "Respawn" smoothly.
+- **Auto-Respawn Cursor Fix & Quality-of-Life:**
   - `Spacious 3D Pill Navbar`: Redesigned 330px wide UI with distinct glowing pill navigation tabs, clear active/hover highlights, and spacious option padding.
   - `Sniper Zoom (Toggle & Hold)`: Upgraded zoom logic that activates instantly on `KeyC` (configurable), supporting both single-click Toggle and Hold actions.
   - `Continuous Auto-Escape`: Fixed recovery lockout hysteresis so auto-escape triggers reliably on every low-HP encounter without getting stuck.
@@ -45,7 +47,7 @@ A modern, high-performance userscript for [Shell Shockers](https://shellshock.io
 
 ### 1-Click Install / Update
 If you have **Violentmonkey** or **Tampermonkey** installed, open this link in your browser:
-👉 **[Install ST v3.2](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
+👉 **[Install ST v3.3](https://raw.githubusercontent.com/HasithX/shellshockers/main/lm.user.js)**
 
 The extension will pop up with an **Install** or **Update** button. Click it, then refresh Shell Shockers.
 
@@ -59,6 +61,7 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 - **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `ST` button)
 - **Aim Key:** Hold `Right Mouse Button` (Mouse2)
 - **Sniper Zoom (Binoculars):** Click or hold `C` (configurable in Combat tab)
+- **Switch Gun:** Scroll `Mouse Wheel Up / Down`
 - **Save Safe Point:** `G`
 - **Teleport to Nearest Safe Point:** `H`
 

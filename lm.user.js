@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Shell Shockers Aimbot + ESP (ST v3.2)
+// @name         Shell Shockers Aimbot + ESP (ST v3.3)
 // @namespace    https://github.com/hasithx/shellshockers/
 // @license      GPL-3.0
-// @version      3.2.0
+// @version      3.3.0
 // @author       hasithx
-// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, adblocker, auto-respawn cursor fix, modern cyber blue GUI
+// @description  ESP, tracers, auto-fire, FOV aimbot, advance shoot point, tactical HUD, auto-escape, safe points, enemy freeze/pull, infinite ammo, grenade trajectory, sniper zoom, stats HUD, wheel gun switch, countdown fix, clean respawn, modern cyber blue GUI
 // @match        https://shellshock.io/*
 // @match        https://shellshockers.io/*
 // @match        https://geometry.best/*
@@ -78,7 +78,7 @@
         zoomFov: 25,
         zoomMode: 'toggle',
         statsHud: true,
-        blockAds: true,
+        wheelWeaponSwitch: true,
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -366,52 +366,73 @@
             origCanvasRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
             HTMLCanvasElement.prototype.requestPointerLock = function (...args) {
                 if (panel) return Promise.resolve ? Promise.resolve() : undefined;
-                // If player is dead or in death screen, release mouse so Play button can be clicked!
-                if (typeof ss !== 'undefined' && ss.MYPLAYER) {
-                    const me = ss.MYPLAYER;
-                    const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
-                    if (!me[H.playing] || myHp <= 0) {
-                        return Promise.resolve ? Promise.resolve() : undefined;
-                    }
-                }
                 return origCanvasRequestPointerLock.apply(this, args);
             };
             HTMLCanvasElement.prototype.requestPointerLock.__lmHooked = true;
         }
     }
 
-    // ================= AD BLOCKER =================
-    let lastAdBlockCheck = 0;
-    function applyAdBlock() {
-        if (!S.blockAds) return;
-        try {
-            if (!document.getElementById('st-adblock-style')) {
-                const style = document.createElement('style');
-                style.id = 'st-adblock-style';
-                style.textContent = `
-                    #adContainer, #adContainer2, #chumContainer, .ad-container, .ad-wrapper,
-                    [id*="adContainer"], [id*="google_ads"], iframe[src*="doubleclick"],
-                    iframe[src*="googlesyndication"], #preroll, .advertisement, #midroll {
-                        display: none !important;
-                        visibility: hidden !important;
-                        pointer-events: none !important;
-                        width: 0 !important;
-                        height: 0 !important;
-                        opacity: 0 !important;
-                    }
-                `;
-                (document.head || document.documentElement).appendChild(style);
-            }
-            const adSelectors = ['#adContainer', '#adContainer2', '#chumContainer', '[id*="adContainer"]', '#preroll'];
-            for (const sel of adSelectors) {
-                const el = document.querySelector(sel);
-                if (el && el.style.display !== 'none') {
-                    el.style.display = 'none';
-                    el.style.pointerEvents = 'none';
+    // ================= MOUSE WHEEL WEAPON SWITCH =================
+    let currentGunIdx = 0;
+    const gunNames = ['EggK-47', 'Scrambler', 'Free Ranger', 'RPEGG', 'Whipper', 'Crackshot', 'Tri-Hard'];
+
+    function cycleGun(delta) {
+        if (typeof ss === 'undefined' || !ss.MYPLAYER) return;
+        const me = ss.MYPLAYER;
+
+        // If player object has weapons array:
+        if (me.weapons && Array.isArray(me.weapons) && me.weapons.length > 1) {
+            let cur = me.weapons.indexOf(me[H.weapon] || me.weapon || me.Ha);
+            if (cur === -1) cur = currentGunIdx;
+            let next = (cur + delta + me.weapons.length) % me.weapons.length;
+            currentGunIdx = next;
+
+            for (const fn of ['setWeapon', 'switchWeapon', 'changeWeapon', 'equipWeapon', 'selectWeapon']) {
+                if (typeof me[fn] === 'function') {
+                    try { me[fn](next); } catch (e) { }
                 }
             }
-        } catch (e) { }
+
+            if (me.weapons[next]) {
+                if (H.weapon) me[H.weapon] = me.weapons[next];
+                if (me.weapon) me.weapon = me.weapons[next];
+                if (me.Ha) me.Ha = me.weapons[next];
+            }
+
+            const name = me.weapons[next].name || gunNames[next] || `Gun #${next + 1}`;
+            showToast(`Gun: ${name}`);
+            return;
+        }
+
+        // Cycle through standard Shell Shockers 7 weapons
+        currentGunIdx = (currentGunIdx + delta + 7) % 7;
+        for (const fn of ['setWeapon', 'switchWeapon', 'changeWeapon', 'equipWeapon', 'selectWeapon']) {
+            if (typeof me[fn] === 'function') {
+                try { me[fn](currentGunIdx); } catch (e) { }
+            }
+        }
+        if (typeof me.weaponIdx === 'number') me.weaponIdx = currentGunIdx;
+        if (typeof me.weaponIndex === 'number') me.weaponIndex = currentGunIdx;
+        if (typeof me.selectedWeapon === 'number') me.selectedWeapon = currentGunIdx;
+
+        // Also trigger DOM weapon select if available
+        const gunButtons = document.querySelectorAll('.gun_box, .weapon-item, [data-weapon-id], #weaponSelect option');
+        if (gunButtons && gunButtons.length > currentGunIdx) {
+            try { gunButtons[currentGunIdx].click(); } catch (e) { }
+        }
+
+        showToast(`Gun: ${gunNames[currentGunIdx] || ('#' + currentGunIdx)}`);
     }
+
+    // Attach passive wheel listener to cycle guns
+    window.addEventListener('wheel', e => {
+        if (isUIElement(e.target)) return;
+        if (panel) return;
+        if (!S.wheelWeaponSwitch) return;
+        if (typeof ss === 'undefined' || !ss.MYPLAYER) return;
+        const delta = e.deltaY > 0 ? 1 : -1;
+        cycleGun(delta);
+    }, { passive: true });
 
     function restorePointerLock() {
         if (HTMLCanvasElement.prototype.requestPointerLock && HTMLCanvasElement.prototype.requestPointerLock.__lmHooked) {
@@ -2039,20 +2060,17 @@
                 (H.scoped && me[H.scoped]) || (H.isScoped && me[H.isScoped]) ||
                 (me[H.weapon] && (me[H.weapon].isScoped || me[H.weapon].scoped)));
 
-            // Release pointer lock on death so player can freely click Play/Respawn button!
+            // Release pointer lock on death transition so player can freely click Play/Respawn!
             const myHpVal = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
             const isMeAlive = !!me[H.playing] && myHpVal > 0;
-            if (!isMeAlive) {
+            if (wasAlive && !isMeAlive) {
+                wasAlive = false;
                 waitingForHpRecovery = false; // Reset escape lockout on death
                 if (document.pointerLockElement) {
                     try { document.exitPointerLock(); } catch (e) { }
                 }
-            }
-
-            // Periodic AdBlocker check
-            if (Date.now() - lastAdBlockCheck > 1500) {
-                lastAdBlockCheck = Date.now();
-                applyAdBlock();
+            } else if (!wasAlive && isMeAlive) {
+                wasAlive = true;
             }
 
             // Sniper Zoom (prioritized so it works regardless of isScoped glitches)
@@ -2573,7 +2591,7 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.2</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.3</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
@@ -2656,6 +2674,7 @@
 
             const pageCombat = tabPages.combat;
             check(pageCombat, 'Auto fire', 'autoFire');
+            check(pageCombat, 'Mouse wheel gun switch', 'wheelWeaponSwitch');
             check(pageCombat, 'Lead prediction', 'prediction');
             range(pageCombat, 'Aim height', 'aimHeight', 0.1, 0.55, 0.05);
             range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
@@ -2752,7 +2771,6 @@
             check(pageVis, 'On-screen stats HUD', 'statsHud');
 
             const pageMisc = tabPages.misc;
-            check(pageMisc, 'Block & hide ads', 'blockAds');
             check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
             check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
             range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
@@ -2822,9 +2840,9 @@
             ensureOverlay();
             ensureBadge();
             hookPointerLock();
-            applyAdBlock();
+            
         } else setTimeout(boot, 100);
     };
     boot();
-    log('ST v3.2 loaded');
+    log('ST v3.3 loaded');
 })();

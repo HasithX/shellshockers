@@ -154,9 +154,12 @@
             killAll();
             return;
         }
-        if (e.code === (S.zoomKey || 'KeyC') || e.key.toLowerCase() === 'c') {
+        if (e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || e.key.toLowerCase() === 'c') {
             if (S.zoomMode === 'toggle') {
                 zoomToggled = !zoomToggled;
+                showToast(zoomToggled ? '🔭 Sniper Zoom: ON (25°)' : '🔭 Sniper Zoom: OFF');
+            } else {
+                showToast('🔭 Sniper Zoom: Active (Holding)');
             }
         }
         // Direct number keys 1-7 for weapon selection
@@ -173,7 +176,12 @@
     onKeyDownUI.__lmUI = true;
     document.addEventListener('keydown', onKeyDownUI, true);
 
-    const onKeyUpUI = e => keys.delete(e.code);
+    const onKeyUpUI = e => {
+        keys.delete(e.code);
+        if ((e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || e.key.toLowerCase() === 'c') && S.zoomMode === 'hold') {
+            showToast('🔭 Sniper Zoom: Released');
+        }
+    };
     onKeyUpUI.__lmUI = true;
     document.addEventListener('keyup', onKeyUpUI, true);
 
@@ -2132,23 +2140,19 @@
         opts = opts || {};
         if (typeof ss === 'undefined' || !ss.MYPLAYER || !S.enabled || killAllBusy) return;
         const me = ss.MYPLAYER;
-        if (!me[H.playing] || (H.hp && typeof me[H.hp] === 'number' && me[H.hp] <= 0)) return;
+        const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
+        if (!me[H.playing] || myHp <= 0) {
+            showToast('💥 KILL ALL: Must be alive in-game to fire');
+            return;
+        }
 
         killAllBusy = true;
         const t0 = performance.now();
         let shotCount = 0;
 
         try {
-            if (S.killAllSwitchToRpegg !== false) {
-                if (typeof detectCurrentGun === 'function' && detectCurrentGun() !== 3) {
-                    selectGun(3);
-                }
-                me.weaponIdx = 3;
-                me.weaponIndex = 3;
-                me.classIdx = 3;
-            }
-
-            const maxRange = (typeof S.killAllRange === 'number') ? S.killAllRange : 120;
+            // Target search with generous default range (250m)
+            const maxRange = (typeof S.killAllRange === 'number' && S.killAllRange > 0) ? S.killAllRange : 250;
             const limit = (typeof S.killAllLimit === 'number') ? S.killAllLimit : 10;
             const myTeam = (typeof me.team === 'number') ? me.team : 0;
 
@@ -2170,43 +2174,34 @@
             const selected = targets.slice(0, limit);
 
             if (selected.length === 0) {
-                showToast('KILL ALL: No targets in range');
+                showToast('💥 KILL ALL: No enemies in range');
+                killAllBusy = false;
                 return;
             }
+
+            showToast(`💥 KILL ALL: Striking ${selected.length} enemies...`);
 
             const origYaw = me[H.yaw];
             const origPitch = me[H.pitch];
 
-            for (let i = 0; i < selected.length; i++) {
+            // Helper to refill ammo & clear weapon cooldowns on active weapon
+            function prepWeapon() {
                 try {
-                    const target = selected[i].P;
-                    const a = anglesTo(target, me);
-
-                    me[H.yaw] = a.yaw;
-                    me[H.pitch] = a.pitch;
-
-                    if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
-                        yawpitch.setToYawPitch(a.yaw, a.pitch);
-                    }
-
-                    const curWp = (H.weapon && me[H.weapon]) || me.weapon || (me.weapons && me.weapons[me.weaponIdx || 0]);
+                    const curWp = me[H.weapon] || (me.weapons && me.weapons[me.weaponIdx || 0]) || (me.weapons && me.weapons[0]) || me.weapon;
                     const ammo = (curWp && curWp.ammo) || (me.weapons && me.weapons[0] && me.weapons[0].ammo);
                     if (ammo) {
-                        const maxCap = (typeof ammo.maxCapacity === 'number') ? ammo.maxCapacity : ((typeof ammo.capacity === 'number') ? ammo.capacity : 999);
-                        if (typeof ammo.fa === 'number') ammo.fa = maxCap;
-                        if (H.rounds && typeof ammo[H.rounds] === 'number') ammo[H.rounds] = maxCap;
-                        if (typeof ammo.rounds === 'number') ammo.rounds = maxCap;
-                        if (typeof ammo.store === 'number') ammo.store = 999;
-                        if (typeof ammo.Ua === 'number') ammo.Ua = 999;
-                        if (typeof ammo.F$ === 'number') ammo.F$ = 999;
+                        ammo.fa = 999;
+                        ammo.store = 999;
+                        if (H.rounds) ammo[H.rounds] = 999;
+                        if (ammo.rounds) ammo.rounds = 999;
+                        if (ammo.Ua) ammo.Ua = 999;
+                        if (ammo.F$) ammo.F$ = 999;
                     }
-
                     me.reloading = false;
                     me.reloadCountdown = 0;
                     me.roundsToReload = 0;
                     lastShotAt = 0;
                     burstStartAt = 0;
-
                     if (curWp && typeof curWp === 'object') {
                         const cdRegex = /cooldown|lastshot|nextshot|canshoot|timesince|firedelay/i;
                         for (const key of Object.keys(curWp)) {
@@ -2215,28 +2210,56 @@
                             }
                         }
                     }
-
-                    fireEvent(true);
-                    fireEvent(false);
-                    shotCount++;
-                } catch (err) { }
+                } catch (e) { }
             }
 
-            const keepAim = (opts && opts.keepAim !== undefined) ? opts.keepAim : S.killAllKeepAim;
-            if (!keepAim) {
-                me[H.yaw] = origYaw;
-                me[H.pitch] = origPitch;
-                if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
-                    yawpitch.setToYawPitch(origYaw, origPitch);
+            // Rapid-fire sequence: holds each shot for 35ms so game tick registers the packet, then advances
+            let idx = 0;
+            function strikeNext() {
+                if (idx >= selected.length) {
+                    const keepAim = (opts && opts.keepAim !== undefined) ? opts.keepAim : S.killAllKeepAim;
+                    if (!keepAim) {
+                        me[H.yaw] = origYaw;
+                        me[H.pitch] = origPitch;
+                        if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                            yawpitch.setToYawPitch(origYaw, origPitch);
+                        }
+                    }
+                    fireEvent(false);
+                    killAllBusy = false;
+                    const elapsed = (performance.now() - t0).toFixed(0);
+                    showToast(`🎯 KILL ALL: ${shotCount} shots landed in ${elapsed}ms!`);
+                    log(`KILL ALL completed: ${shotCount} shots in ${elapsed} ms`);
+                    return;
+                }
+
+                try {
+                    const target = selected[idx].P;
+                    const a = anglesTo(target, me);
+                    me[H.yaw] = a.yaw;
+                    me[H.pitch] = a.pitch;
+                    if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                        yawpitch.setToYawPitch(a.yaw, a.pitch);
+                    }
+
+                    prepWeapon();
+                    fireEvent(true);
+                    shotCount++;
+
+                    setTimeout(() => {
+                        fireEvent(false);
+                        idx++;
+                        setTimeout(strikeNext, 15);
+                    }, 35);
+                } catch (err) {
+                    idx++;
+                    setTimeout(strikeNext, 10);
                 }
             }
 
-            const elapsed = (performance.now() - t0).toFixed(1);
-            showToast(`KILL ALL: ${shotCount} targets`);
-            log(`KILL ALL dispatched ${shotCount} rockets in ${elapsed} ms`);
+            strikeNext();
         } catch (e) {
             log('KILL ALL error:', e);
-        } finally {
             killAllBusy = false;
         }
     }
@@ -2357,16 +2380,16 @@
             }
 
             // Sniper Zoom (prioritized so it works regardless of isScoped glitches)
-            const isZoomHeld = keys.has(S.zoomKey || 'KeyC') || keys.has('KeyC');
-            const isZooming = S.sniperZoom && (zoomToggled || isZoomHeld);
+            const isZoomHeld = keys.has(S.zoomKey || 'KeyC') || keys.has('KeyC') || keys.has('Keyc');
+            const isZooming = S.sniperZoom && (S.zoomMode === 'toggle' ? zoomToggled : (zoomToggled || isZoomHeld));
 
             if (isZooming) {
                 const targetFov = (S.zoomFov || 25) * DEG;
-                cam.fov += (targetFov - cam.fov) * 0.35;
+                cam.fov = targetFov;
             } else if (!isScoped) {
                 const targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
                 if (Math.abs(cam.fov - targetFov) > 0.005) {
-                    cam.fov += (targetFov - cam.fov) * 0.35;
+                    cam.fov += (targetFov - cam.fov) * 0.4;
                 }
             }
 
@@ -2864,7 +2887,7 @@
         try {
             panel = document.createElement('div');
             panel.id = 'st-panel';
-            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:330px;max-height:510px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(10,18,30,.96);color:#e2e8f0;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:12px 14px;border:1.5px solid #00b4d8;border-radius:12px;z-index:2147483600;box-shadow:0 10px 35px rgba(0,0,0,.9), 0 0 18px rgba(0,180,216,0.28);user-select:none';
+            panel.style.cssText = 'position:fixed;top:60px;right:16px;width:420px;max-height:580px;display:flex;flex-direction:column;pointer-events:auto;background:rgba(10,18,30,.96);color:#e2e8f0;font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:14px 16px;border:1.5px solid #00b4d8;border-radius:12px;z-index:2147483600;box-shadow:0 10px 35px rgba(0,0,0,.9), 0 0 18px rgba(0,180,216,0.28);user-select:none';
 
             const stopEv = e => e.stopPropagation();
             stopEv.__lmUI = true;
@@ -2874,16 +2897,16 @@
             panel.addEventListener('wheel', stopEv);
 
             const headBar = document.createElement('div');
-            headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(0,180,216,0.3)';
+            headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.4</span> <span style="color:#64748b;font-size:10px">by hasithx</span>';
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:14px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.4</span> <span style="color:#64748b;font-size:11px">by hasithx</span>';
             headBar.appendChild(title);
 
             const closeBtn = document.createElement('div');
             closeBtn.textContent = '×';
             closeBtn.title = 'Close menu (Toggle with ~ or Insert)';
-            closeBtn.style.cssText = 'cursor:pointer;color:#aaa;font-weight:bold;font-size:16px;line-height:12px;padding:2px 4px;border-radius:3px';
+            closeBtn.style.cssText = 'cursor:pointer;color:#aaa;font-weight:bold;font-size:18px;line-height:14px;padding:2px 6px;border-radius:4px';
             closeBtn.onmouseenter = () => closeBtn.style.color = '#fff';
             closeBtn.onmouseleave = () => closeBtn.style.color = '#aaa';
             closeBtn.onclick = e => {
@@ -2894,21 +2917,30 @@
             panel.appendChild(headBar);
 
             statusEl = document.createElement('div');
-            statusEl.style.cssText = 'color:#38bdf8;margin-bottom:6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#09131f;padding:4px 8px;border-radius:5px;border:1px solid rgba(0,180,216,0.25)';
+            statusEl.style.cssText = 'color:#38bdf8;margin-bottom:8px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#09131f;padding:5px 8px;border-radius:5px;border:1px solid rgba(0,180,216,0.25)';
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
             const tabRow = document.createElement('div');
-            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(8, 1fr);gap:4px;background:rgba(6,12,20,0.75);padding:4px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
+            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;background:rgba(6,12,20,0.75);padding:6px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
             panel.appendChild(tabRow);
 
-            const tabs = ['combat', 'escape', 'enemies', 'visuals', 'misc', 'kill', 'guide', 'config'];
-            const tabLabels = { combat: 'Combat', escape: 'Escape', enemies: 'Enemies', visuals: 'Visuals', misc: 'Misc', kill: 'Kill', guide: 'Guide', config: 'Config' };
+            const tabs = ['combat', 'escape', 'enemies', 'visuals', 'kill', 'misc', 'guide', 'config'];
+            const tabLabels = {
+                combat: '🎯 Combat',
+                escape: '🛡️ Escape',
+                enemies: '🧊 Enemies',
+                visuals: '👁️ Visuals',
+                kill: '💥 Kill All',
+                misc: '⚙️ Misc',
+                guide: '📖 Guide',
+                config: '🔧 Config'
+            };
             const tabButtons = {};
             const tabPages = {};
 
             const contentArea = document.createElement('div');
-            contentArea.style.cssText = 'overflow-y:auto;max-height:380px;padding-right:4px;overscroll-behavior:contain';
+            contentArea.style.cssText = 'overflow-y:auto;max-height:430px;padding-right:6px;overscroll-behavior:contain';
             panel.appendChild(contentArea);
 
             let activeTab = S.activeTab || 'combat';
@@ -2933,7 +2965,7 @@
             tabs.forEach(t => {
                 const b = document.createElement('button');
                 b.textContent = tabLabels[t];
-                b.style.cssText = 'border:1px solid rgba(0,180,216,0.15);border-radius:6px;padding:6px 2px;font:bold 11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;transition:all .18s ease;background:#0d1826;color:#94a3b8;text-align:center;box-sizing:border-box';
+                b.style.cssText = 'border:1px solid rgba(0,180,216,0.15);border-radius:6px;padding:7px 4px;font:bold 11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;transition:all .18s ease;background:#0d1826;color:#94a3b8;text-align:center;box-sizing:border-box';
                 b.onmouseenter = () => {
                     if (activeTab !== t) {
                         b.style.background = '#15253b';
@@ -3113,26 +3145,74 @@
 
             const pageGuide = tabPages.guide;
             const guideBox = document.createElement('div');
-            guideBox.style.cssText = 'color:#cbd5e1;font-size:11px;line-height:1.55;background:rgba(9,19,31,0.7);padding:10px;border-radius:8px;border:1px solid rgba(0,180,216,0.25)';
+            guideBox.style.cssText = 'color:#cbd5e1;font-size:11px;line-height:1.55;background:rgba(9,19,31,0.85);padding:12px;border-radius:8px;border:1px solid rgba(0,180,216,0.3)';
             guideBox.innerHTML = `
-                <div style="color:#00e5ff;font-weight:bold;font-size:13px;margin-bottom:6px;border-bottom:1px solid rgba(0,180,216,0.3);padding-bottom:4px">📖 KILL ALL — System Guide</div>
-                <p style="margin:4px 0 8px 0"><b style="color:#38bdf8">What it does:</b> Dispatches rapid aim-snaps and rocket discharges to all eligible enemies within range synchronously in a single frame. Because RPEGG rockets deal area-of-effect (AoE) splash damage, direct raycast line-of-sight is not strictly required.</p>
-                <div style="color:#38bdf8;font-weight:bold;margin-bottom:4px">🚀 Step-by-Step Usage:</div>
-                <ol style="margin:0 0 8px 18px;padding:0">
-                    <li>Spawn into any public match.</li>
-                    <li>Equip the <b>RPEGG</b> (Key <b>4</b> or auto-switch toggle).</li>
-                    <li>Press <b style="color:#f87171">[V]</b> or click the <b>KILL ALL</b> button.</li>
-                    <li>All enemies in range will receive one rocket in one server tick.</li>
-                </ol>
-                <div style="color:#38bdf8;font-weight:bold;margin-bottom:4px">⚡ One-Packet Batching:</div>
-                <p style="margin:0 0 8px 0">By executing all target turns, clip refills, and fire events synchronously without <code>setTimeout</code> delays, the client's network layer packages the fire events into a single outbound packet bundle received by the server simultaneously.</p>
-                <div style="color:#f59e0b;font-weight:bold;margin-bottom:4px">⚠️ Troubleshooting & Tips:</div>
-                <ul style="margin:0 0 8px 18px;padding:0">
-                    <li><b>Nothing dies?</b> Verify RPEGG is active and check Team Check if in team mode.</li>
-                    <li><b>Stragglers survive?</b> Lower Max Targets limit or raise Max Range slider.</li>
-                    <li><b>Enemy pull conflict:</b> Turn off <i>Freeze Enemies (Pull)</i> mode before triggering.</li>
-                    <li><b>Visual desync:</b> Rapid multi-target snapping is experimental and may cause momentary visual mesh desync.</li>
-                </ul>
+                <div style="color:#00e5ff;font-weight:bold;font-size:14px;margin-bottom:8px;border-bottom:1px solid rgba(0,180,216,0.3);padding-bottom:4px">📖 ST v3.4 — Complete User Manual & Guide</div>
+
+                <!-- KEYBINDS TABLE -->
+                <div style="background:rgba(15,23,42,0.8);padding:8px 10px;border-radius:6px;border:1px solid rgba(0,180,216,0.2);margin-bottom:10px">
+                    <div style="color:#38bdf8;font-weight:bold;margin-bottom:6px">⌨️ Quick Controls & Keybinds</div>
+                    <table style="width:100%;font-size:10px;border-collapse:collapse;color:#cbd5e1">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ ~ ] / [ Insert ]</b></td><td>Open / Close ST Cheat Menu (or click bottom-left ST badge)</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ Mouse2 ] (Right Click)</b></td><td>Hold to lock Aimbot on closest enemy</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">Wheel / [ 1 ] – [ 7 ]</b></td><td>Select Weapon: 1:EggK47, 2:Scrambler, 3:Ranger, 4:RPEGG, 5:Whipper, 6:Crackshot, 7:TriHard</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ K ]</b></td><td><b>⚡ Re-deploy:</b> Immediately spawn in with your newly selected gun!</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#f87171">[ V ]</b></td><td><b>💥 KILL ALL:</b> Rapid multi-target strike on all enemies in range!</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#38bdf8">[ C ]</b></td><td><b>🔭 Sniper Zoom:</b> Telescope / Binocular FOV zoom (25°) with ANY weapon</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#10b981">[ G ]</b></td><td>Save current position as Safe Point (up to 10 stored)</td></tr>
+                        <tr><td style="padding:3px 0"><b style="color:#10b981">[ H ]</b></td><td>Teleport to nearest Safe Point</td></tr>
+                    </table>
+                </div>
+
+                <!-- 1. COMBAT & AIMBOT -->
+                <div style="margin-bottom:10px">
+                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">🎯 1. Combat & Aimbot</div>
+                    <ul style="margin:0 0 6px 16px;padding:0">
+                        <li><b>Triggerbot (Auto Fire):</b> Automatically fires whenever an enemy enters your crosshair/aim cone.</li>
+                        <li><b>Lead Prediction:</b> Accurately predicts bullet travel time against moving, jumping, or bunny-hopping targets.</li>
+                        <li><b>Aim Height:</b> Vertical offset adjustment. Default (0.35 - 0.40) aims at the upper egg head for instant critical damage.</li>
+                    </ul>
+                </div>
+
+                <!-- 2. 7-GUN WEAPON SWITCHER -->
+                <div style="margin-bottom:10px">
+                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">🔫 2. 7-Weapon Switcher & Instant Re-deploy</div>
+                    <ul style="margin:0 0 6px 16px;padding:0">
+                        <li>Scroll your <b>Mouse Wheel</b> or press keys <b>1 to 7</b> anywhere (lobby or in-game) to choose any of the 7 weapon classes.</li>
+                        <li><b>How Shell Shockers Works:</b> Guns are player classes assigned at spawn. When you select a gun mid-game, it queues for your next life.</li>
+                        <li><b>⚡ Instant Spawn:</b> Press <b>[K]</b> or click <i>Re-deploy</i> to spawn immediately with your new 3D gun in 0.3s!</li>
+                    </ul>
+                </div>
+
+                <!-- 3. KILL ALL FEATURE -->
+                <div style="margin-bottom:10px">
+                    <div style="color:#f87171;font-weight:bold;font-size:12px;margin-bottom:4px">💥 3. KILL ALL System</div>
+                    <ul style="margin:0 0 6px 16px;padding:0">
+                        <li>Press <b>[V]</b> or click the big red <i>KILL ALL</i> button.</li>
+                        <li>The script cycles through all enemies within range, aligns angles, refills clip to 999, clears firing cooldowns, and dispatches rapid confirmed hits.</li>
+                        <li>Works with all weapons (extra deadly with <b>RPEGG</b> explosive splash or <b>Crackshot</b> headshots).</li>
+                    </ul>
+                </div>
+
+                <!-- 4. SNIPER ZOOM -->
+                <div style="margin-bottom:10px">
+                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">🔭 4. Sniper Zoom (Binoculars Mode)</div>
+                    <ul style="margin:0 0 6px 16px;padding:0">
+                        <li>Press or hold <b>[C]</b> to drop FOV down to 25° for high-precision long-distance spotting with ANY gun.</li>
+                        <li>Configure <i>Toggle (Click)</i> vs <i>Hold Key</i> in the Combat tab.</li>
+                    </ul>
+                </div>
+
+                <!-- 5. TACTICAL & VISUALS -->
+                <div style="margin-bottom:10px">
+                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">👁️ 5. Tactical Predictors & ESP</div>
+                    <ul style="margin:0 0 6px 16px;padding:0">
+                        <li><b>💣 Grenade Arc:</b> Real-time 3D parabolic trajectory line predicts bounce points and detonation location.</li>
+                        <li><b>Advance Shoot Point:</b> Cyber HUD center crosshair reticle that never goes missing and dynamically shifts colors on target lock.</li>
+                        <li><b>📊 Stats HUD:</b> Top-left corner widget tracking live FPS, killstreak (with 🔥 fire aura), total kills, deaths, and K/D.</li>
+                        <li><b>🛡️ Auto Escape:</b> Automatically raycasts floor points and teleports behind cover when your HP drops below 35.</li>
+                    </ul>
+                </div>
             `;
             pageGuide.appendChild(guideBox);
 

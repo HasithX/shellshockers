@@ -2484,25 +2484,9 @@
         } catch (e) { }
     }
 
-    function restoreGameUIIfNeeded() {
-        try {
-            // Restore any UI container that might have had style.display='none' inadvertently set
-            const roots = document.querySelectorAll('main, #app, #home_screen, #play_game, #playSection');
-            for (const r of roots) {
-                if (r && r.style && r.style.display === 'none') {
-                    r.style.display = '';
-                }
-                if (r && r.style && r.style.pointerEvents === 'none') {
-                    r.style.pointerEvents = '';
-                }
-            }
-        } catch (e) { }
-    }
-
     function dialogWatchdog(me) {
         try {
             hookTeamSwitchProtection();
-            restoreGameUIIfNeeded();
 
             // ONLY run watchdog when actually alive in a match!
             // Never touch anything on the home screen or start menu!

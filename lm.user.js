@@ -476,22 +476,7 @@
         S.currentGun = String(classIdx);
         save();
 
-        const alive = isPlayerAliveInMatch();
-        if (alive) {
-            // When alive in a match: ONLY queue the weapon for next spawn.
-            // Absolutely NEVER click background DOM or call changeClass mid-life,
-            // which causes the "SWITCH TO TEAM" modal to popup and freeze controls!
-            try {
-                const vd = unsafeWindow.vueData || window.vueData;
-                if (vd) vd.classIdx = classIdx;
-                const va = unsafeWindow.vueApp || window.vueApp;
-                if (va) va.classIdx = classIdx;
-            } catch (e) { }
-            showToast(`🔫 Next Spawn: ${gunDisplayNames[classIdx]} (Press [K] to Re-deploy)`);
-            return;
-        }
-
-        // On lobby, death, or respawn screen: cleanly apply weapon choice
+        // 1. Always update Vue application data
         try {
             const vd = unsafeWindow.vueData || window.vueData;
             if (vd) vd.classIdx = classIdx;
@@ -502,6 +487,10 @@
                     if (va.$refs.weaponSelect && typeof va.$refs.weaponSelect.onWeaponSelect === 'function') {
                         va.$refs.weaponSelect.onWeaponSelect(classIdx);
                     }
+                    if (va.$refs.gameScreen && va.$refs.gameScreen.$refs && va.$refs.gameScreen.$refs.weaponSelect &&
+                        typeof va.$refs.gameScreen.$refs.weaponSelect.onWeaponSelect === 'function') {
+                        va.$refs.gameScreen.$refs.weaponSelect.onWeaponSelect(classIdx);
+                    }
                     if (va.$refs.equipScreen && va.$refs.equipScreen.$refs && va.$refs.equipScreen.$refs.weapon_select) {
                         va.$refs.equipScreen.$refs.weapon_select.selectClass(classIdx);
                     }
@@ -509,6 +498,7 @@
             }
         } catch (e) { }
 
+        // 2. Always tell the game engine via extern.changeClass so weapon queues for spawn
         try {
             const ext = unsafeWindow.extern || window.extern;
             if (ext && typeof ext.changeClass === 'function') {
@@ -516,7 +506,17 @@
             }
         } catch (e) { }
 
-        // Strictly scoped DOM click inside #weapon_select without bubbling to team switch
+        // 3. Update player entity mirror if in-game
+        try {
+            if (typeof ss !== 'undefined' && ss.MYPLAYER) {
+                const me = ss.MYPLAYER;
+                me.weaponIdx = classIdx;
+                me.weaponIndex = classIdx;
+                me.classIdx = classIdx;
+            }
+        } catch (e) { }
+
+        // 4. Update the weapon grid visually in DOM (without bubbling)
         try {
             const weaponGrid = document.querySelector('#weapon_select .weapon-grid, #weapon_select');
             if (weaponGrid) {
@@ -528,7 +528,6 @@
                     const html = (item.innerHTML || '') + ' ' + (item.getAttribute('name') || '');
                     if (html.toLowerCase().includes(targetKey) || i === classIdx) {
                         item.dispatchEvent(new MouseEvent('click', { bubbles: false, cancelable: true, view: window }));
-                        if (typeof item.click === 'function') item.click();
                         break;
                     }
                 }
@@ -540,33 +539,43 @@
             if (bawk && typeof bawk.play === 'function') bawk.play('ui_click');
         } catch (e) { }
 
-        showToast(`🔫 Gun Selected: ${gunDisplayNames[classIdx]}`);
+        const alive = isPlayerAliveInMatch();
+        if (alive) {
+            showToast(`🔫 Weapon: ${gunDisplayNames[classIdx]} (Re-deploy with [K] or on respawn)`);
+        } else {
+            showToast(`🔫 Gun Selected: ${gunDisplayNames[classIdx]}`);
+        }
     }
 
     function quickRespawn() {
         showToast('⚡ Re-deploying with new gun...');
+        // Sync weapon choice to game engine right before respawn
+        if (currentGunIdx !== null && currentGunIdx !== undefined) {
+            try {
+                const ext = unsafeWindow.extern || window.extern;
+                if (ext && typeof ext.changeClass === 'function') {
+                    ext.changeClass(currentGunIdx);
+                }
+            } catch (e) { }
+        }
+
+        // Call native extern.respawn() first
         try {
-            if (typeof ss !== 'undefined' && ss.MYPLAYER) {
-                const me = ss.MYPLAYER;
-                if (H.hp && typeof me[H.hp] === 'number') me[H.hp] = 0;
-                if (typeof me.hp === 'number') me.hp = 0;
+            const ext = unsafeWindow.extern || window.extern;
+            if (ext && typeof ext.respawn === 'function') {
+                ext.respawn();
             }
         } catch (e) { }
 
+        // Safely click PLAY/RESPAWN button — NEVER .btn_team_switch!
         setTimeout(() => {
             try {
-                const ext = unsafeWindow.extern || window.extern;
-                if (ext && typeof ext.respawn === 'function') {
-                    ext.respawn();
+                const playBtn = document.querySelector('#respawnBtn, #play_game, button.btn-respawn:not(.btn_team_switch)');
+                if (playBtn && typeof playBtn.click === 'function') {
+                    playBtn.click();
                 }
             } catch (e) { }
-            try {
-                const respawnBtns = document.querySelectorAll('#respawn, .respawn, [id*="respawn"], .btn-respawn');
-                for (const b of respawnBtns) {
-                    if (b && typeof b.click === 'function') b.click();
-                }
-            } catch (e) { }
-        }, 250);
+        }, 150);
     }
 
     function isEquipScreenOpen() {
@@ -597,18 +606,10 @@
         const delta = e.deltaY > 0 ? 1 : -1;
         if (wheelDebounceTimer) clearTimeout(wheelDebounceTimer);
         wheelDebounceTimer = setTimeout(() => {
-            const cur = detectCurrentGun();
+            const cur = (currentGunIdx !== null && currentGunIdx !== undefined) ? currentGunIdx : detectCurrentGun();
             const nextIdx = (cur + delta + 7) % 7;
-            currentGunIdx = nextIdx;
-            S.currentGun = String(nextIdx);
-            save();
-
-            if (isEquipScreenOpen()) {
-                selectGun(nextIdx);
-            } else {
-                showToast(`🔫 Next respawn weapon: ${gunNames[nextIdx] || nextIdx}`);
-            }
-        }, 120);
+            selectGun(nextIdx);
+        }, 100);
     }, { passive: true });
 
     function restorePointerLock() {
@@ -2415,7 +2416,7 @@
             const style = window.getComputedStyle(el);
             if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
             const txt = (el.textContent || '');
-            if (txt.includes('SWITCH TO TEAM') && txt.includes('Your score will be reset')) {
+            if (txt.includes('SWITCH TO TEAM') || (txt.includes('Your score will be reset') && (txt.includes('RED') || txt.includes('BLUE')))) {
                 return el;
             }
         }
@@ -2424,6 +2425,22 @@
 
     function clickDialogChoice(dlg, choice) {
         if (!dlg) return false;
+
+        const isYes = choice.toLowerCase().includes('yes');
+        // Targeted CSS classes from Shell Shockers small-popup component (.btn_green = Yes, .btn_red = No)
+        const targetBtn = dlg.querySelector(isYes ? '.btn_green' : '.btn_red') ||
+            (!isYes ? dlg.querySelector('.popup_close') : null);
+
+        if (targetBtn) {
+            try {
+                targetBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                targetBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                targetBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                if (typeof targetBtn.click === 'function') targetBtn.click();
+                return true;
+            } catch (e) { }
+        }
+
         const btns = dlg.querySelectorAll('button, a, div[role="button"], input[type="button"], [class*="btn"]');
         for (let i = 0; i < btns.length; i++) {
             const b = btns[i];
@@ -2453,7 +2470,22 @@
         }
     }
 
+    let teamSwitchListenerHooked = false;
     function hookTeamSwitchProtection() {
+        if (!teamSwitchListenerHooked) {
+            teamSwitchListenerHooked = true;
+            try {
+                // Intercept any synthetic or bubbling clicks on team switch button
+                window.addEventListener('click', e => {
+                    const btn = e.target && (e.target.closest ? e.target.closest('.btn_team_switch') : null);
+                    if (btn && !e.isTrusted) {
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                    }
+                }, true);
+            } catch (e) { }
+        }
+
         try {
             const va = unsafeWindow.vueApp || window.vueApp;
             if (va) {
@@ -2480,6 +2512,32 @@
                     };
                     va.$refs.switchTeamPopup.show.__stHooked = true;
                 }
+
+                if (va.$refs && va.$refs.gameScreen) {
+                    const gs = va.$refs.gameScreen;
+                    if (typeof gs.onSwitchTeamClicked === 'function' && !gs.onSwitchTeamClicked.__stHooked) {
+                        const origGs = gs.onSwitchTeamClicked;
+                        gs.onSwitchTeamClicked = function () {
+                            if (isPlayerAliveInMatch()) {
+                                log('Suppressed accidental gameScreen.onSwitchTeamClicked while in-game');
+                                return;
+                            }
+                            return origGs.apply(this, arguments);
+                        };
+                        gs.onSwitchTeamClicked.__stHooked = true;
+                    }
+                    if (gs.$refs && gs.$refs.switchTeamPopup && typeof gs.$refs.switchTeamPopup.show === 'function' && !gs.$refs.switchTeamPopup.show.__stHooked) {
+                        const origShowGs = gs.$refs.switchTeamPopup.show;
+                        gs.$refs.switchTeamPopup.show = function () {
+                            if (isPlayerAliveInMatch()) {
+                                log('Suppressed accidental gameScreen.switchTeamPopup.show while in-game');
+                                return;
+                            }
+                            return origShowGs.apply(this, arguments);
+                        };
+                        gs.$refs.switchTeamPopup.show.__stHooked = true;
+                    }
+                }
             }
         } catch (e) { }
     }
@@ -2488,12 +2546,14 @@
         try {
             hookTeamSwitchProtection();
 
-            // ONLY run watchdog when actually alive in a match!
-            // Never touch anything on the home screen or start menu!
-            if (!isPlayerAliveInMatch()) {
-                dialogDetected = false;
-                return;
-            }
+            // Do not dismiss modals while on the home screen / main lobby
+            try {
+                const va = unsafeWindow.vueApp || window.vueApp;
+                if (va && va.screens && va.showScreen === va.screens.home) {
+                    dialogDetected = false;
+                    return;
+                }
+            } catch (e) { }
 
             const dlg = findTeamDialog();
             if (dlg) {
@@ -2505,6 +2565,12 @@
                 const choice = S.autoAcceptTeamSwitch ? 'Yes' : 'No';
                 clickDialogChoice(dlg, choice);
 
+                // Immediately restore key capture so movement and aim are never locked
+                try {
+                    const ext = unsafeWindow.extern || window.extern;
+                    if (ext && typeof ext.captureKeys === 'function') ext.captureKeys();
+                } catch (e) { }
+
                 if (!dialogPollTimer) {
                     const targetNode = dlg;
                     const pollStart = Date.now();
@@ -2512,13 +2578,21 @@
                         const stillOpen = document.body && document.body.contains(targetNode) &&
                             targetNode.offsetWidth > 40 && targetNode.offsetHeight > 40 &&
                             window.getComputedStyle(targetNode).display !== 'none';
-                        const timedOut = Date.now() - pollStart > 500;
+                        const timedOut = Date.now() - pollStart > 350;
                         if (!stillOpen || timedOut) {
                             clearInterval(dialogPollTimer);
                             dialogPollTimer = null;
                             dismissedDialogs.add(targetNode);
                             if (activeDialogNode === targetNode) activeDialogNode = null;
                             dialogDetected = false;
+
+                            // Restore key capture, remove dark overlay, re-acquire pointer lock
+                            try {
+                                const ext = unsafeWindow.extern || window.extern;
+                                if (ext && typeof ext.captureKeys === 'function') ext.captureKeys();
+                                const va = unsafeWindow.vueApp || window.vueApp;
+                                if (va && typeof va.setDarkOverlay === 'function') va.setDarkOverlay(false);
+                            } catch (e) { }
 
                             const canvas = document.getElementById('canvas') || document.querySelector('canvas');
                             if (canvas && typeof canvas.requestPointerLock === 'function') {
@@ -2528,7 +2602,7 @@
                             showToast('dialog auto-dismissed');
                             flushQueuedActions();
                         }
-                    }, 50);
+                    }, 40);
                 }
             } else {
                 dialogDetected = false;

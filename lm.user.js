@@ -32,6 +32,7 @@
     // ================= SETTINGS =================
     const DEF = {
         enabled: true,
+        mode: 'basic',                 // 'basic' (Clean ESP + Ammo + Health + Auto-fire) or 'advanced' (Full suite)
         aimMode: 'hold',
         aimKeys: ['Mouse2'],
         aimToggleKey: 'KeyX',
@@ -39,10 +40,10 @@
         smooth: 1.0,
         targetMode: 'crosshair',
         teamCheck: true,
-        autoFire: false,
+        autoFire: true,                // Enabled by default in basic mode
         autoFireOnlyAiming: false,
         autoFireDelay: 30,
-        autoFireFov: 3.5,
+        autoFireFov: 4.0,              // Friendly triggerbot FOV
         autoFireWhenMenuOpen: false,
         freezeEnemies: false,
         freezeMode: 'hold',
@@ -73,14 +74,15 @@
         fovColor: '#00f0ff',
         fovDynamicColor: true,
         grenadeTrajectory: true,
+        grenadeBlastArea: true,        // 💣 Shows grenade blast damage zone
+        wheelZoom: true,               // 🔍 Mouse scroll wheel zooms in / out
         sniperZoom: true,
         zoomKey: 'KeyC',
         zoomFov: 25,
         zoomMode: 'toggle',
         statsHud: true,
-        wheelWeaponSwitch: true,
+        wheelWeaponSwitch: false,      // Weapons switched via 1-7 numbers; wheel is for zoom
         currentGun: '0',
-        quickRespawnKey: 'KeyK',
         killAllKey: 'KeyV',
         killAllLimit: 10,
         killAllRange: 120,
@@ -90,11 +92,11 @@
         autoAcceptTeamSwitch: false,
         hideOwnBody: false,
         hideOwnGun: false,
-        infiniteAmmo: false,
-        holdHealth: false,
+        infiniteAmmo: true,            // Unlimited ammo in basic mode
+        holdHealth: true,              // Health hold in basic mode
         ammoValue: 999,
         panelKeys: ['Insert', 'Backquote'],
-        activeTab: 'combat'
+        activeTab: 'visuals'
     };
     const S = Object.assign({}, DEF, (() => {
         try {
@@ -140,21 +142,19 @@
             return;
         }
         if (isTyping()) return;
-        if (e.code === (S.savePointKey || 'KeyG')) {
-            saveCurrentPoint();
-            return;
-        }
-        if (e.code === (S.gotoPointKey || 'KeyH')) {
-            gotoNearestPoint();
-            return;
-        }
-        if (e.code === (S.quickRespawnKey || 'KeyK')) {
-            quickRespawn();
-            return;
-        }
-        if (e.code === (S.killAllKey || 'KeyV')) {
-            killAll();
-            return;
+        if (S.mode === 'advanced') {
+            if (e.code === (S.savePointKey || 'KeyG')) {
+                saveCurrentPoint();
+                return;
+            }
+            if (e.code === (S.gotoPointKey || 'KeyH')) {
+                gotoNearestPoint();
+                return;
+            }
+            if (e.code === (S.killAllKey || 'KeyV')) {
+                killAll();
+                return;
+            }
         }
         const isKeyC = (e.key && typeof e.key.toLowerCase === 'function' && e.key.toLowerCase() === 'c');
         if (e.code === (S.zoomKey || 'KeyC') || e.code === 'KeyC' || isKeyC) {
@@ -165,12 +165,16 @@
                 showToast('🔭 Sniper Zoom: Active (Holding)');
             }
         }
-        // Direct number keys 1-7 for weapon selection
-        if (S.wheelWeaponSwitch && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].includes(e.code)) {
+        // Direct number keys 1-7 for weapon selection + instant spawn
+        if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].includes(e.code)) {
             const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
             if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
             const gunNum = parseInt(e.code.replace('Digit', ''), 10) - 1;
             selectGun(gunNum);
+            // Combined K-key re-deploy directly with 1-7 numbers!
+            if (isPlayerAliveInMatch()) {
+                quickRespawn();
+            }
             return;
         }
         keys.add(e.code);
@@ -396,11 +400,24 @@
 
     let origCanvasRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
 
+    function isPointerLockAllowed() {
+        if (panel) return false;
+        try {
+            const va = unsafeWindow.vueApp || window.vueApp;
+            if (va) {
+                if (va.screens && va.showScreen === va.screens.home) return false;
+                if (va.isRespawning || (va.game && va.game.isPaused)) return false;
+                if (va.game && va.game.pauseScreen && va.game.pauseScreen.showMenu) return false;
+            }
+        } catch (e) { }
+        return isPlayerAliveInMatch();
+    }
+
     function hookPointerLock() {
         if (HTMLCanvasElement.prototype.requestPointerLock && !HTMLCanvasElement.prototype.requestPointerLock.__lmHooked) {
             origCanvasRequestPointerLock = HTMLCanvasElement.prototype.requestPointerLock;
             HTMLCanvasElement.prototype.requestPointerLock = function (...args) {
-                if (panel) return Promise.resolve ? Promise.resolve() : undefined;
+                if (!isPointerLockAllowed()) return Promise.resolve ? Promise.resolve() : undefined;
                 return origCanvasRequestPointerLock.apply(this, args);
             };
             HTMLCanvasElement.prototype.requestPointerLock.__lmHooked = true;
@@ -541,14 +558,14 @@
 
         const alive = isPlayerAliveInMatch();
         if (alive) {
-            showToast(`🔫 Weapon: ${gunDisplayNames[classIdx]} (Re-deploy with [K] or on respawn)`);
+            showToast(`🔫 ${gunDisplayNames[classIdx]} selected (Spawning...)`);
         } else {
             showToast(`🔫 Gun Selected: ${gunDisplayNames[classIdx]}`);
         }
     }
 
     function quickRespawn() {
-        showToast('⚡ Re-deploying with new gun...');
+        showToast('⚡ Spawning with selected weapon...');
         // Sync weapon choice to game engine right before respawn
         if (currentGunIdx !== null && currentGunIdx !== undefined) {
             try {
@@ -575,7 +592,7 @@
                     playBtn.click();
                 }
             } catch (e) { }
-        }, 150);
+        }, 120);
     }
 
     function isEquipScreenOpen() {
@@ -598,18 +615,33 @@
         return false;
     }
 
-    let wheelDebounceTimer = null;
+    // ================= MOUSE WHEEL SMOOTH ZOOM =================
+    let wheelZoomLevel = 0; // 0 = 1.0x (normal), 1 = 1.4x (55 deg), 2 = 1.9x (40 deg), 3 = 3.0x (25 deg), 4 = 5.0x (15 deg)
+    const zoomLevels = [0, 55, 40, 25, 15];
+
     window.addEventListener('wheel', e => {
         if (isUIElement(e.target)) return;
         if (panel) return;
-        if (!S.wheelWeaponSwitch) return;
-        const delta = e.deltaY > 0 ? 1 : -1;
-        if (wheelDebounceTimer) clearTimeout(wheelDebounceTimer);
-        wheelDebounceTimer = setTimeout(() => {
-            const cur = (currentGunIdx !== null && currentGunIdx !== undefined) ? currentGunIdx : detectCurrentGun();
-            const nextIdx = (cur + delta + 7) % 7;
-            selectGun(nextIdx);
-        }, 100);
+        if (!S.wheelZoom) return;
+
+        // deltaY < 0 is scroll up (Zoom In), deltaY > 0 is scroll down (Zoom Out)
+        if (e.deltaY < 0) {
+            if (wheelZoomLevel < zoomLevels.length - 1) {
+                wheelZoomLevel++;
+            }
+        } else if (e.deltaY > 0) {
+            if (wheelZoomLevel > 0) {
+                wheelZoomLevel--;
+            }
+        }
+
+        const targetFovDeg = zoomLevels[wheelZoomLevel];
+        if (wheelZoomLevel === 0) {
+            showToast('🔍 Zoom: Normal (1.0x)');
+        } else {
+            const mag = (75 / targetFovDeg).toFixed(1);
+            showToast(`🔍 Zoom: ${mag}x (${targetFovDeg}° FOV)`);
+        }
     }, { passive: true });
 
     function restorePointerLock() {
@@ -1944,11 +1976,13 @@
         } catch (e) { }
     }
 
-    // ================= GRENADE TRAJECTORY PREDICTOR =================
+    // ================= GRENADE TRAJECTORY & BLAST AREA PREDICTOR =================
     let grenadeMesh = null;
+    let grenadeBlastMesh = null;
     function updateGrenadeTrajectory(me) {
         if (!S.grenadeTrajectory || !me || !ss.SCENE) {
             if (grenadeMesh) grenadeMesh.setEnabled(false);
+            if (grenadeBlastMesh) grenadeBlastMesh.setEnabled(false);
             return;
         }
 
@@ -1956,6 +1990,7 @@
         const m = actor ? (actor[H.mesh] || actor.mesh) : null;
         if (!m || !m.position) {
             if (grenadeMesh) grenadeMesh.setEnabled(false);
+            if (grenadeBlastMesh) grenadeBlastMesh.setEnabled(false);
             return;
         }
 
@@ -1979,6 +2014,7 @@
 
         const points = [new BABYLON.Vector3(curX, curY, curZ)];
         const TOTAL_POINTS = 36;
+        let impactPoint = null;
 
         for (let i = 0; i < TOTAL_POINTS - 1; i++) {
             const nextX = curX + vx * dt;
@@ -2000,7 +2036,8 @@
                 });
 
                 if (hit && hit.hit && hit.pickedPoint) {
-                    points.push(hit.pickedPoint.clone());
+                    impactPoint = hit.pickedPoint.clone();
+                    points.push(impactPoint);
                     break;
                 }
             }
@@ -2012,7 +2049,7 @@
             if (curY < -25) break;
         }
 
-        const lastPt = points[points.length - 1];
+        const lastPt = impactPoint || points[points.length - 1];
         while (points.length < TOTAL_POINTS) {
             points.push(lastPt.clone());
         }
@@ -2028,6 +2065,35 @@
             } else {
                 grenadeMesh.setEnabled(true);
                 BABYLON.MeshBuilder.CreateLines(undefined, { points, instance: grenadeMesh, updatable: true });
+            }
+
+            // Draw Blast / Damage Area Circle at Impact Point
+            if (S.grenadeBlastArea && lastPt) {
+                const BLAST_RADIUS = 5.2; // Shell Shockers grenade lethal damage radius
+                const CIRCLE_SEGMENTS = 24;
+                const circlePoints = [];
+                for (let s = 0; s <= CIRCLE_SEGMENTS; s++) {
+                    const angle = (s / CIRCLE_SEGMENTS) * Math.PI * 2;
+                    circlePoints.push(new BABYLON.Vector3(
+                        lastPt.x + Math.cos(angle) * BLAST_RADIUS,
+                        lastPt.y + 0.12,
+                        lastPt.z + Math.sin(angle) * BLAST_RADIUS
+                    ));
+                }
+
+                if (!grenadeBlastMesh) {
+                    grenadeBlastMesh = BABYLON.MeshBuilder.CreateLines('st_grenade_blast', { points: circlePoints, updatable: true }, ss.SCENE);
+                    grenadeBlastMesh.isPickable = false;
+                    grenadeBlastMesh.alwaysSelectAsActiveMesh = true;
+                    grenadeBlastMesh.doNotSyncBoundingInfo = true;
+                    if (H.renderingGroupId) grenadeBlastMesh[H.renderingGroupId] = 1;
+                    grenadeBlastMesh.color = BABYLON.Color3.FromHexString('#ff3344');
+                } else {
+                    grenadeBlastMesh.setEnabled(true);
+                    BABYLON.MeshBuilder.CreateLines(undefined, { points: circlePoints, instance: grenadeBlastMesh, updatable: true });
+                }
+            } else if (grenadeBlastMesh) {
+                grenadeBlastMesh.setEnabled(false);
             }
         } catch (e) { }
     }
@@ -2632,7 +2698,9 @@
                 const isZoomHeld = keys.has(S.zoomKey || 'KeyC') || keys.has('KeyC') || keys.has('Keyc');
                 const isZooming = S.sniperZoom && (S.zoomMode === 'toggle' ? zoomToggled : (zoomToggled || isZoomHeld));
                 if (cam) {
-                    if (isZooming) {
+                    if (wheelZoomLevel > 0) {
+                        cam.fov = zoomLevels[wheelZoomLevel] * DEG;
+                    } else if (isZooming) {
                         cam.fov = (S.zoomFov || 25) * DEG;
                     } else if (!isScoped) {
                         const targetFov = S.camFov > 0 ? S.camFov * DEG : (origCamFov !== null ? origCamFov : 0.8);
@@ -2684,15 +2752,22 @@
 
             yawpitch.magicValue = 0.0025 * Math.max(0.15, S.smooth);
 
-            // Release pointer lock on death transition so player can freely click Play/Respawn!
+            // Release pointer lock on death or inactive so player can freely click Play/Respawn!
             const myHpVal = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
             const isMeAlive = !!me[H.playing] && myHpVal > 0;
+            if (!isMeAlive) {
+                if (document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (e) { }
+                }
+                document.body.style.cursor = 'default';
+            }
             if (wasAlive && !isMeAlive) {
                 wasAlive = false;
                 waitingForHpRecovery = false; // Reset escape lockout on death
                 if (document.pointerLockElement) {
                     try { document.exitPointerLock(); } catch (e) { }
                 }
+                document.body.style.cursor = 'default';
                 // When death screen appears, apply the queued weapon choice!
                 setTimeout(() => {
                     if (currentGunIdx !== null && currentGunIdx !== undefined) {
@@ -2719,29 +2794,29 @@
             let autoFireEnemy = null, bestFireAng = Infinity;
             const myId = me[H.uniqueId] || me.uniqueId || me.id;
 
-            // sustained teleport write
-            applyTeleport(me);
-
-            // velocity drive fallback
-            if (Date.now() < teleportDriveUntil && teleportTargetPos && me) {
-                try {
-                    const toX = teleportTargetPos.x - me[H.x];
-                    const toZ = teleportTargetPos.z - me[H.z];
-                    const distH = Math.hypot(toX, toZ);
-                    if (distH > 0.3) {
-                        const dirX = toX / distH;
-                        const dirZ = toZ / distH;
-                        if (typeof me.dx === 'number') me.dx = dirX * 0.28;
-                        if (typeof me.$a === 'number') me.$a = dirZ * 0.28;
-                        if (typeof me.Va === 'number') me.Va = dirX * 0.28;
-                        if (typeof me.Ya === 'number') me.Ya = dirZ * 0.28;
-                        if (typeof me.Ia === 'number') me.Ia |= 1;
-                    }
-                } catch (e) { }
+            // Movement / Escape hacks ONLY run in advanced mode (prevents camera desync & top-down view glitch in basic mode)
+            if (S.mode === 'advanced') {
+                applyTeleport(me);
+                if (Date.now() < teleportDriveUntil && teleportTargetPos && me) {
+                    try {
+                        const toX = teleportTargetPos.x - me[H.x];
+                        const toZ = teleportTargetPos.z - me[H.z];
+                        const distH = Math.hypot(toX, toZ);
+                        if (distH > 0.3) {
+                            const dirX = toX / distH;
+                            const dirZ = toZ / distH;
+                            if (typeof me.dx === 'number') me.dx = dirX * 0.28;
+                            if (typeof me.$a === 'number') me.$a = dirZ * 0.28;
+                            if (typeof me.Va === 'number') me.Va = dirX * 0.28;
+                            if (typeof me.Ya === 'number') me.Ya = dirZ * 0.28;
+                            if (typeof me.Ia === 'number') me.Ia |= 1;
+                        }
+                    } catch (e) { }
+                }
+                checkAutoEscape(me);
+                updateEnemyManipulation(me);
             }
 
-            checkAutoEscape(me);
-            updateEnemyManipulation(me);
             updateGrenadeTrajectory(me);
             updateStatsHud(me);
 
@@ -2900,8 +2975,10 @@
             }
 
             if (aiming() && target) {
-                yawpitch.setToYawPitch(target.yaw, target.pitch);
-                lastTargetPlayer = target.P;
+                if (S.mode === 'advanced') {
+                    yawpitch.setToYawPitch(target.yaw, target.pitch);
+                    lastTargetPlayer = target.P;
+                }
             } else {
                 lastTargetPlayer = null;
             }
@@ -2952,9 +3029,10 @@
                 const tgtStr = activeTgt ? (activeTgt.ang / DEG).toFixed(1) + '°' : '-';
                 const fireState = !S.autoFire ? 'OFF' : (firing ? 'FIRING' : (autoFireEnemy ? 'LOCKED' : 'READY'));
                 const fovDeg = (cam && typeof cam.fov === 'number') ? (cam.fov / DEG).toFixed(0) : '-';
-                const escStr = tpMovedDist > 0 ? `${escReason} (${tpMovedDist.toFixed(1)}m)` : escReason;
+                const zoomStr = wheelZoomLevel > 0 ? `${(75 / zoomLevels[wheelZoomLevel]).toFixed(1)}x` : '1x';
+                const modeStr = S.mode === 'basic' ? 'BASIC' : 'ADV';
                 statusEl.textContent =
-                    `tgt ${tgtStr} | fire ${fireState} | fov ${fovDeg}° | ${ammoStatusStr} | ${healthStatusStr} | esc ${escStr}`;
+                    `[${modeStr}] tgt ${tgtStr} | fire ${fireState} | zoom ${zoomStr} (${fovDeg}°) | ${ammoStatusStr} | ${healthStatusStr}`;
             }
 
             for (let i = ESPArray.length - 1; i >= 0; i--) {
@@ -3212,8 +3290,24 @@
             headBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;cursor:move;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(0,180,216,0.3)';
 
             const title = document.createElement('div');
-            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:14px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.4</span> <span style="color:#64748b;font-size:11px">by hasithx</span>';
-            headBar.appendChild(title);
+            title.innerHTML = '<span style="color:#00e5ff;font-weight:bold;font-size:14px;letter-spacing:0.5px;text-shadow:0 0 8px rgba(0,229,255,0.5)">ST v3.5</span> <span style="color:#64748b;font-size:11px">by hasithx</span>';
+
+            const rightHead = document.createElement('div');
+            rightHead.style.cssText = 'display:flex;align-items:center;gap:6px';
+
+            const modeBtn = document.createElement('button');
+            modeBtn.style.cssText = 'background:' + (S.mode === 'basic' ? 'linear-gradient(135deg, #0284c7, #0369a1)' : 'linear-gradient(135deg, #7c3aed, #6d28d9)') + ';color:#ffffff;border:1px solid ' + (S.mode === 'basic' ? '#38bdf8' : '#a78bfa') + ';border-radius:4px;font:bold 10px monospace;padding:3px 8px;cursor:pointer;box-shadow:0 0 8px ' + (S.mode === 'basic' ? 'rgba(2,132,199,0.5)' : 'rgba(124,58,237,0.5)') + ';transition:all .15s ease';
+            modeBtn.textContent = S.mode === 'basic' ? '🔰 MODE: BASIC' : '⚡ MODE: ADVANCED';
+            modeBtn.title = 'Click to switch between Basic (Clean ESP, Ammo, Auto-fire) and Advanced Mode (Full Suite)';
+            modeBtn.onclick = () => {
+                S.mode = S.mode === 'basic' ? 'advanced' : 'basic';
+                if (S.mode === 'basic') S.activeTab = 'visuals';
+                save();
+                showToast(`Switched to ${S.mode.toUpperCase()} Mode`);
+                if (panel) { panel.remove(); panel = null; }
+                buildPanel();
+            };
+            rightHead.appendChild(modeBtn);
 
             const closeBtn = document.createElement('div');
             closeBtn.textContent = '×';
@@ -3225,7 +3319,10 @@
                 e.stopPropagation();
                 togglePanel();
             };
-            headBar.appendChild(closeBtn);
+            rightHead.appendChild(closeBtn);
+
+            headBar.appendChild(title);
+            headBar.appendChild(rightHead);
             panel.appendChild(headBar);
 
             statusEl = document.createElement('div');
@@ -3233,11 +3330,8 @@
             statusEl.textContent = 'waiting for game...';
             panel.appendChild(statusEl);
 
-            const tabRow = document.createElement('div');
-            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;background:rgba(6,12,20,0.75);padding:6px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
-            panel.appendChild(tabRow);
-
-            const tabs = ['combat', 'escape', 'enemies', 'visuals', 'kill', 'misc', 'guide', 'config'];
+            const isBasic = (S.mode === 'basic');
+            const tabs = isBasic ? ['visuals', 'combat', 'config'] : ['combat', 'escape', 'enemies', 'visuals', 'kill', 'misc', 'guide', 'config'];
             const tabLabels = {
                 combat: '🎯 Combat',
                 escape: '🛡️ Escape',
@@ -3248,6 +3342,11 @@
                 guide: '📖 Guide',
                 config: '🔧 Config'
             };
+
+            const tabRow = document.createElement('div');
+            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(' + (isBasic ? '3' : '4') + ', 1fr);gap:6px;background:rgba(6,12,20,0.75);padding:6px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
+            panel.appendChild(tabRow);
+
             const tabButtons = {};
             const tabPages = {};
 
@@ -3255,8 +3354,8 @@
             contentArea.style.cssText = 'overflow-y:auto;max-height:430px;padding-right:6px;overscroll-behavior:contain';
             panel.appendChild(contentArea);
 
-            let activeTab = S.activeTab || 'combat';
-            if (!tabs.includes(activeTab)) activeTab = 'combat';
+            let activeTab = S.activeTab || (isBasic ? 'visuals' : 'combat');
+            if (!tabs.includes(activeTab)) activeTab = tabs[0];
 
             function switchTab(t) {
                 activeTab = t;
@@ -3302,106 +3401,127 @@
                 tabPages[t] = page;
             });
 
+            // ================= PAGE: COMBAT =================
             const pageCombat = tabPages.combat;
-            check(pageCombat, 'Auto fire', 'autoFire');
-            check(pageCombat, 'Mouse wheel / 1-7 gun switch', 'wheelWeaponSwitch');
-            select(pageCombat, 'Active Gun', 'currentGun', [
-                ['0', 'EggK-47 (Assault)'],
-                ['1', 'Scrambler (Shotgun)'],
-                ['2', 'Free Ranger (Sniper)'],
-                ['3', 'RPEGG (Rocket)'],
-                ['4', 'Whipper (SMG)'],
-                ['5', 'Crackshot (Bolt-Action)'],
-                ['6', 'Tri-Hard (Burst)']
-            ]);
-            const qrRow = row(pageCombat, 'Re-deploy Key');
-            const qrBtn = btn(qrRow, S.quickRespawnKey || 'KeyK', () => {
-                bindKey(qrBtn, code => {
-                    S.quickRespawnKey = code;
-                    save();
+            head(pageCombat, '⚡ Auto-Fire & Combat Enhancements');
+            check(pageCombat, 'Auto fire (Triggerbot)', 'autoFire');
+            check(pageCombat, 'Infinite ammo (999 rounds)', 'infiniteAmmo');
+            check(pageCombat, 'Hold max health (100 HP)', 'holdHealth');
+            check(pageCombat, 'Mouse wheel smooth zoom (In / Out)', 'wheelZoom');
+
+            head(pageCombat, '🔫 Instant 7-Gun Switch & Spawn (Keys 1–7)');
+            const gunGrid = document.createElement('div');
+            gunGrid.style.cssText = 'display:grid;grid-template-columns:repeat(2, 1fr);gap:4px;margin-bottom:8px';
+            gunDisplayNames.forEach((name, idx) => {
+                const gBtn = document.createElement('button');
+                gBtn.textContent = `[${idx + 1}] ${name}`;
+                gBtn.style.cssText = 'background:#132337;color:#bae6fd;border:1px solid #0284c7;border-radius:4px;cursor:pointer;font:bold 10px monospace;padding:5px 4px;text-align:center;transition:all .15s ease';
+                gBtn.onclick = () => {
+                    selectGun(idx);
+                    if (isPlayerAliveInMatch()) quickRespawn();
+                };
+                gunGrid.appendChild(gBtn);
+            });
+            pageCombat.appendChild(gunGrid);
+
+            if (!isBasic) {
+                head(pageCombat, '🎯 Advanced Aimbot & Target Tracking');
+                check(pageCombat, 'Lead prediction', 'prediction');
+                range(pageCombat, 'Aim height', 'aimHeight', 0.1, 0.55, 0.05);
+                range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
+                range(pageCombat, 'Fire delay (ms)', 'autoFireDelay', 0, 300, 5);
+                check(pageCombat, 'Fire in menu', 'autoFireWhenMenuOpen');
+                const kb = row(pageCombat, 'Aim key');
+                const kbBtn = btn(kb, S.aimKeys.join(',') || 'none', () => {
+                    bindKey(kbBtn, code => {
+                        S.aimKeys = [code];
+                        save();
+                    }, () => S.aimKeys.join(','));
                 });
-            });
-            btn(qrRow, '⚡ Re-deploy', () => quickRespawn());
-            check(pageCombat, 'Lead prediction', 'prediction');
-            range(pageCombat, 'Aim height', 'aimHeight', 0.1, 0.55, 0.05);
-            range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
-            range(pageCombat, 'Fire delay (ms)', 'autoFireDelay', 0, 300, 5);
-            check(pageCombat, 'Fire in menu', 'autoFireWhenMenuOpen');
-            const kb = row(pageCombat, 'Aim key');
-            const kbBtn = btn(kb, S.aimKeys.join(',') || 'none', () => {
-                bindKey(kbBtn, code => {
-                    S.aimKeys = [code];
-                    save();
-                }, () => S.aimKeys.join(','));
-            });
-            kbBtn.style.flex = '0 0 auto';
-            range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
-            range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
-            head(pageCombat, 'Sniper Zoom (Binoculars)');
-            check(pageCombat, 'Sniper zoom mode', 'sniperZoom');
-            select(pageCombat, 'Zoom action', 'zoomMode', [
-                ['toggle', 'Toggle (Click)'],
-                ['hold', 'Hold Key']
-            ]);
-            const zk = row(pageCombat, 'Zoom key');
-            const zkBtn = btn(zk, S.zoomKey || 'KeyC', () => {
-                bindKey(zkBtn, code => {
-                    S.zoomKey = code;
-                    save();
-                }, () => S.zoomKey || 'KeyC');
-            });
-            zkBtn.style.flex = '0 0 auto';
-            range(pageCombat, 'Zoom FOV (deg)', 'zoomFov', 10, 50, 5);
+                kbBtn.style.flex = '0 0 auto';
+                range(pageCombat, 'Aim FOV', 'aimFov', 5, 180, 1);
+                range(pageCombat, 'Smoothness', 'smooth', 0.15, 4, 0.05);
 
-            const pageEscape = tabPages.escape;
-            check(pageEscape, 'Auto escape', 'autoEscape');
-            range(pageEscape, 'Escape HP', 'escapeHp', 10, 90, 5);
-            range(pageEscape, 'Search radius (m)', 'escapeRadius', 3, 15, 1);
-            range(pageEscape, 'Teleport ms', 'teleportMs', 200, 2000, 50);
-            const pBtnRow = row(pageEscape, 'Points');
-            btn(pBtnRow, 'Save Point (G)', () => saveCurrentPoint());
-            btn(pBtnRow, 'Go To (H)', () => gotoNearestPoint());
+                head(pageCombat, 'Sniper Zoom (Key C)');
+                check(pageCombat, 'Sniper zoom mode', 'sniperZoom');
+                select(pageCombat, 'Zoom action', 'zoomMode', [
+                    ['toggle', 'Toggle (Click)'],
+                    ['hold', 'Hold Key']
+                ]);
+                const zk = row(pageCombat, 'Zoom key');
+                const zkBtn = btn(zk, S.zoomKey || 'KeyC', () => {
+                    bindKey(zkBtn, code => {
+                        S.zoomKey = code;
+                        save();
+                    }, () => S.zoomKey || 'KeyC');
+                });
+                zkBtn.style.flex = '0 0 auto';
+                range(pageCombat, 'Zoom FOV (deg)', 'zoomFov', 10, 50, 5);
+            }
 
-            const tRow = row(pageEscape, 'Test');
-            btn(tRow, 'TP +10m X', () => {
-                const me = ss.MYPLAYER;
-                if (!me) { showToast('not in match'); return; }
-                startTeleport(me[H.x] + 10, me[H.y], me[H.z]);
-                showToast('test teleport +10m X');
-            });
-            btn(tRow, 'TP +10m Z', () => {
-                const me = ss.MYPLAYER;
-                if (!me) { showToast('not in match'); return; }
-                startTeleport(me[H.x], me[H.y], me[H.z] + 10);
-                showToast('test teleport +10m Z');
-            });
+            // ================= PAGE: ESCAPE (Advanced Only) =================
+            if (!isBasic && tabPages.escape) {
+                const pageEscape = tabPages.escape;
+                check(pageEscape, 'Auto escape', 'autoEscape');
+                range(pageEscape, 'Escape HP', 'escapeHp', 10, 90, 5);
+                range(pageEscape, 'Search radius (m)', 'escapeRadius', 3, 15, 1);
+                range(pageEscape, 'Teleport ms', 'teleportMs', 200, 2000, 50);
+                const pBtnRow = row(pageEscape, 'Points');
+                btn(pBtnRow, 'Save Point (G)', () => saveCurrentPoint());
+                btn(pBtnRow, 'Go To (H)', () => gotoNearestPoint());
 
-            const escInfo = document.createElement('div');
-            escInfo.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
-            escInfo.innerHTML = '<b>Auto Escape:</b> Relocates player to cover when HP drops.<br>• Raycasts 12 candidate spots.<br>• Teleports &amp; drives velocity into cover.<br>• Keys: <b>[G]</b> Save | <b>[H]</b> Goto<br>• Status shows <b>esc reason</b>';
-            pageEscape.appendChild(escInfo);
+                const tRow = row(pageEscape, 'Test');
+                btn(tRow, 'TP +10m X', () => {
+                    const me = ss.MYPLAYER;
+                    if (!me) { showToast('not in match'); return; }
+                    startTeleport(me[H.x] + 10, me[H.y], me[H.z]);
+                    showToast('test teleport +10m X');
+                });
+                btn(tRow, 'TP +10m Z', () => {
+                    const me = ss.MYPLAYER;
+                    if (!me) { showToast('not in match'); return; }
+                    startTeleport(me[H.x], me[H.y], me[H.z] + 10);
+                    showToast('test teleport +10m Z');
+                });
 
-            const pageEnemies = tabPages.enemies;
-            check(pageEnemies, 'Freeze enemies', 'freezeEnemies');
-            select(pageEnemies, 'Mode', 'freezeMode', [
-                ['hold', 'Hold spot'],
-                ['pull', 'Pull front'],
-                ['aimserver', 'Aim Server (Hit Reg)']
-            ]);
-            range(pageEnemies, 'Pull distance', 'pullDistance', 3, 25, 1);
-            const enemyNote = document.createElement('div');
-            enemyNote.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
-            enemyNote.innerHTML = '<b>Notice:</b> Game is server-authoritative.<br>• <i>Hold/Pull:</i> Overwrites visual meshes.<br>• <i>Aim Server:</i> Aimbot targets actual server position.';
-            pageEnemies.appendChild(enemyNote);
+                const escInfo = document.createElement('div');
+                escInfo.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
+                escInfo.innerHTML = '<b>Auto Escape:</b> Relocates player to cover when HP drops.<br>• Raycasts 12 candidate spots.<br>• Keys: <b>[G]</b> Save | <b>[H]</b> Goto<br>• Status shows <b>esc reason</b>';
+                pageEscape.appendChild(escInfo);
+            }
 
+            // ================= PAGE: ENEMIES (Advanced Only) =================
+            if (!isBasic && tabPages.enemies) {
+                const pageEnemies = tabPages.enemies;
+                check(pageEnemies, 'Freeze enemies', 'freezeEnemies');
+                select(pageEnemies, 'Mode', 'freezeMode', [
+                    ['hold', 'Hold spot'],
+                    ['pull', 'Pull front'],
+                    ['aimserver', 'Aim Server (Hit Reg)']
+                ]);
+                range(pageEnemies, 'Pull distance', 'pullDistance', 3, 25, 1);
+                const enemyNote = document.createElement('div');
+                enemyNote.style.cssText = 'color:#888;font-size:10px;margin-top:8px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
+                enemyNote.innerHTML = '<b>Notice:</b> Game is server-authoritative.<br>• <i>Hold/Pull:</i> Overwrites visual meshes.<br>• <i>Aim Server:</i> Aimbot targets actual server position.';
+                pageEnemies.appendChild(enemyNote);
+            }
+
+            // ================= PAGE: VISUALS =================
             const pageVis = tabPages.visuals;
-            check(pageVis, 'ESP boxes', 'espBox');
+            head(pageVis, '👁️ Enemy Visuals & ESP');
+            check(pageVis, 'ESP 3D boxes', 'espBox');
             check(pageVis, 'ESP tracers', 'espTracer');
-            check(pageVis, 'ESP names', 'espName');
-            check(pageVis, 'ESP health', 'espHealth');
-            check(pageVis, 'ESP distance', 'espDistance');
-            check(pageVis, 'Closest red box', 'highlightClosest');
-            head(pageVis, 'Aim & Crosshair Reticle');
+            check(pageVis, 'ESP player names', 'espName');
+            check(pageVis, 'ESP health bars', 'espHealth');
+            check(pageVis, 'ESP distance labels', 'espDistance');
+            check(pageVis, 'Closest enemy red box', 'highlightClosest');
+
+            head(pageVis, '💣 Tactical Predictor & Blast Area');
+            check(pageVis, 'Grenade trajectory arc', 'grenadeTrajectory');
+            check(pageVis, '💣 Grenade blast damage area', 'grenadeBlastArea');
+            check(pageVis, 'On-screen stats HUD', 'statsHud');
+
+            head(pageVis, '🎯 Aim Reticle & FOV Circle');
             check(pageVis, 'FOV ring', 'fovCircle');
             check(pageVis, 'Advance shoot point', 'shootPoint');
             select(pageVis, 'Reticle style', 'shootPointStyle', [
@@ -3413,124 +3533,88 @@
             check(pageVis, 'Dynamic lock color', 'fovDynamicColor');
             color(pageVis, 'Reticle color', 'fovColor');
             range(pageVis, 'Camera FOV (0=def)', 'camFov', 0, 130, 5);
-            head(pageVis, 'Tactical Predictor & HUD');
-            check(pageVis, 'Grenade trajectory arc', 'grenadeTrajectory');
-            check(pageVis, 'On-screen stats HUD', 'statsHud');
 
-            const pageMisc = tabPages.misc;
-            check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
-            check(pageMisc, 'Auto accept team switch', 'autoAcceptTeamSwitch');
-            check(pageMisc, 'Infinite ammo', 'infiniteAmmo');
-            range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
-            check(pageMisc, 'Hold max health', 'holdHealth');
-            check(pageMisc, 'Hide own body', 'hideOwnBody');
-            check(pageMisc, 'Hide own gun', 'hideOwnGun');
+            // ================= PAGE: MISC (Advanced Only) =================
+            if (!isBasic && tabPages.misc) {
+                const pageMisc = tabPages.misc;
+                check(pageMisc, 'Auto jump (B-Hop)', 'autoJump');
+                check(pageMisc, 'Auto accept team switch', 'autoAcceptTeamSwitch');
+                range(pageMisc, 'Ammo count', 'ammoValue', 50, 9999, 50);
+                check(pageMisc, 'Hide own body', 'hideOwnBody');
+                check(pageMisc, 'Hide own gun', 'hideOwnGun');
+            }
 
-            const pageKill = tabPages.kill;
-            const killBtnRow = document.createElement('div');
-            killBtnRow.style.cssText = 'margin-bottom:10px';
-            const kBtn = document.createElement('button');
-            kBtn.textContent = '💥 KILL ALL';
-            kBtn.style.cssText = 'width:100%;padding:10px 0;background:linear-gradient(135deg, #ef4444, #dc2626);color:#ffffff;border:1px solid #f87171;border-radius:6px;font:bold 14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;box-shadow:0 0 12px rgba(239,68,68,0.5);letter-spacing:1px;transition:all .15s ease';
-            kBtn.onmouseenter = () => { kBtn.style.boxShadow = '0 0 18px rgba(239,68,68,0.8)'; kBtn.style.transform = 'scale(1.02)'; };
-            kBtn.onmouseleave = () => { kBtn.style.boxShadow = '0 0 12px rgba(239,68,68,0.5)'; kBtn.style.transform = 'none'; };
-            kBtn.onclick = () => killAll();
-            killBtnRow.appendChild(kBtn);
-            pageKill.appendChild(killBtnRow);
+            // ================= PAGE: KILL ALL (Advanced Only) =================
+            if (!isBasic && tabPages.kill) {
+                const pageKill = tabPages.kill;
+                const killBtnRow = document.createElement('div');
+                killBtnRow.style.cssText = 'margin-bottom:10px';
+                const kBtn = document.createElement('button');
+                kBtn.textContent = '💥 KILL ALL';
+                kBtn.style.cssText = 'width:100%;padding:10px 0;background:linear-gradient(135deg, #ef4444, #dc2626);color:#ffffff;border:1px solid #f87171;border-radius:6px;font:bold 14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;box-shadow:0 0 12px rgba(239,68,68,0.5);letter-spacing:1px;transition:all .15s ease';
+                kBtn.onmouseenter = () => { kBtn.style.boxShadow = '0 0 18px rgba(239,68,68,0.8)'; kBtn.style.transform = 'scale(1.02)'; };
+                kBtn.onmouseleave = () => { kBtn.style.boxShadow = '0 0 12px rgba(239,68,68,0.5)'; kBtn.style.transform = 'none'; };
+                kBtn.onclick = () => killAll();
+                killBtnRow.appendChild(kBtn);
+                pageKill.appendChild(killBtnRow);
 
-            const killKeyRow = row(pageKill, 'Kill All key');
-            const killKeyBtn = btn(killKeyRow, S.killAllKey || 'KeyV', () => {
-                bindKey(killKeyBtn, code => {
-                    S.killAllKey = code;
-                    save();
+                const killKeyRow = row(pageKill, 'Kill All key');
+                const killKeyBtn = btn(killKeyRow, S.killAllKey || 'KeyV', () => {
+                    bindKey(killKeyBtn, code => {
+                        S.killAllKey = code;
+                        save();
+                    });
                 });
+
+                select(pageKill, 'Firing mode', 'killAllMode', [['sequence', 'Sequence (~16ms)'], ['burst', 'Burst (1 frame)']]);
+                range(pageKill, 'Max targets', 'killAllLimit', 1, 20, 1);
+                range(pageKill, 'Max range (m)', 'killAllRange', 20, 200, 5);
+                check(pageKill, 'Auto-switch to RPEGG', 'killAllSwitchToRpegg');
+                check(pageKill, 'Keep aim on last target', 'killAllKeepAim');
+
+                const killNote = document.createElement('div');
+                killNote.style.cssText = 'color:#94a3b8;font-size:10px;margin-top:10px;line-height:1.4;background:rgba(15,23,42,0.6);padding:8px;border-radius:6px;border:1px solid rgba(239,68,68,0.25)';
+                killNote.innerHTML = '<b style="color:#f87171">Notice:</b> RPEGG must be the active weapon (AoE splash damage). Server-authoritative hit registration may drop stragglers or out-of-sync targets.';
+                pageKill.appendChild(killNote);
+            }
+
+            // ================= PAGE: GUIDE (Advanced Only) =================
+            if (!isBasic && tabPages.guide) {
+                const pageGuide = tabPages.guide;
+                const guideBox = document.createElement('div');
+                guideBox.style.cssText = 'color:#cbd5e1;font-size:11px;line-height:1.55;background:rgba(9,19,31,0.85);padding:12px;border-radius:8px;border:1px solid rgba(0,180,216,0.3)';
+                guideBox.innerHTML = `
+                    <div style="color:#00e5ff;font-weight:bold;font-size:14px;margin-bottom:8px;border-bottom:1px solid rgba(0,180,216,0.3);padding-bottom:4px">📖 ST v3.5 — Polish Edition Guide</div>
+                    <div style="background:rgba(15,23,42,0.8);padding:8px 10px;border-radius:6px;border:1px solid rgba(0,180,216,0.2);margin-bottom:10px">
+                        <div style="color:#38bdf8;font-weight:bold;margin-bottom:6px">⌨️ Quick Controls & Keybinds</div>
+                        <table style="width:100%;font-size:10px;border-collapse:collapse;color:#cbd5e1">
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ ~ ] / [ Insert ]</b></td><td>Open / Close ST Cheat Menu (or click bottom-left ST badge)</td></tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ 1 ] – [ 7 ]</b></td><td><b>Select Gun &amp; Instant Spawn:</b> 1:EggK47, 2:Scrambler, 3:Ranger, 4:RPEGG, 5:Whipper, 6:Crackshot, 7:TriHard</td></tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#38bdf8">Mouse Wheel</b></td><td><b>🔍 Smooth Zoom In / Zoom Out:</b> 1.4x → 1.9x → 3.0x → 5.0x</td></tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#f87171">[ V ]</b></td><td><b>💥 KILL ALL:</b> Rapid multi-target strike on all enemies in range!</td></tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#38bdf8">[ C ]</b></td><td><b>🔭 Sniper Zoom:</b> Telescope / Binocular FOV zoom (25°) with ANY weapon</td></tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#10b981">[ G ]</b></td><td>Save current position as Safe Point</td></tr>
+                            <tr><td style="padding:3px 0"><b style="color:#10b981">[ H ]</b></td><td>Teleport to nearest Safe Point</td></tr>
+                        </table>
+                    </div>
+                `;
+                pageGuide.appendChild(guideBox);
+            }
+
+            // ================= PAGE: CONFIG =================
+            const pageCfg = tabPages.config;
+            head(pageCfg, 'Mode Selection');
+            const mRow = row(pageCfg, 'Active Mode');
+            btn(mRow, S.mode === 'basic' ? '⚡ Switch to Advanced Mode' : '🔰 Switch to Basic Mode', () => {
+                S.mode = (S.mode === 'basic' ? 'advanced' : 'basic');
+                if (S.mode === 'basic') S.activeTab = 'visuals';
+                save();
+                showToast(`Switched to ${S.mode.toUpperCase()} Mode`);
+                if (panel) { panel.remove(); panel = null; }
+                buildPanel();
             });
 
-            select(pageKill, 'Firing mode', 'killAllMode', [['sequence', 'Sequence (~16ms)'], ['burst', 'Burst (1 frame)']]);
-            range(pageKill, 'Max targets', 'killAllLimit', 1, 20, 1);
-            range(pageKill, 'Max range (m)', 'killAllRange', 20, 200, 5);
-            check(pageKill, 'Auto-switch to RPEGG', 'killAllSwitchToRpegg');
-            check(pageKill, 'Keep aim on last target', 'killAllKeepAim');
-
-            const killNote = document.createElement('div');
-            killNote.style.cssText = 'color:#94a3b8;font-size:10px;margin-top:10px;line-height:1.4;background:rgba(15,23,42,0.6);padding:8px;border-radius:6px;border:1px solid rgba(239,68,68,0.25)';
-            killNote.innerHTML = '<b style="color:#f87171">Notice:</b> RPEGG must be the active weapon (AoE splash damage). Server-authoritative hit registration may drop stragglers or out-of-sync targets.';
-            pageKill.appendChild(killNote);
-
-            const pageGuide = tabPages.guide;
-            const guideBox = document.createElement('div');
-            guideBox.style.cssText = 'color:#cbd5e1;font-size:11px;line-height:1.55;background:rgba(9,19,31,0.85);padding:12px;border-radius:8px;border:1px solid rgba(0,180,216,0.3)';
-            guideBox.innerHTML = `
-                <div style="color:#00e5ff;font-weight:bold;font-size:14px;margin-bottom:8px;border-bottom:1px solid rgba(0,180,216,0.3);padding-bottom:4px">📖 ST v3.4 — Complete User Manual & Guide</div>
-
-                <!-- KEYBINDS TABLE -->
-                <div style="background:rgba(15,23,42,0.8);padding:8px 10px;border-radius:6px;border:1px solid rgba(0,180,216,0.2);margin-bottom:10px">
-                    <div style="color:#38bdf8;font-weight:bold;margin-bottom:6px">⌨️ Quick Controls & Keybinds</div>
-                    <table style="width:100%;font-size:10px;border-collapse:collapse;color:#cbd5e1">
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ ~ ] / [ Insert ]</b></td><td>Open / Close ST Cheat Menu (or click bottom-left ST badge)</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ Mouse2 ] (Right Click)</b></td><td>Hold to lock Aimbot on closest enemy</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">Wheel / [ 1 ] – [ 7 ]</b></td><td>Select Weapon: 1:EggK47, 2:Scrambler, 3:Ranger, 4:RPEGG, 5:Whipper, 6:Crackshot, 7:TriHard</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#00e5ff">[ K ]</b></td><td><b>⚡ Re-deploy:</b> Immediately spawn in with your newly selected gun!</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#f87171">[ V ]</b></td><td><b>💥 KILL ALL:</b> Rapid multi-target strike on all enemies in range!</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#38bdf8">[ C ]</b></td><td><b>🔭 Sniper Zoom:</b> Telescope / Binocular FOV zoom (25°) with ANY weapon</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.08)"><td style="padding:3px 0"><b style="color:#10b981">[ G ]</b></td><td>Save current position as Safe Point (up to 10 stored)</td></tr>
-                        <tr><td style="padding:3px 0"><b style="color:#10b981">[ H ]</b></td><td>Teleport to nearest Safe Point</td></tr>
-                    </table>
-                </div>
-
-                <!-- 1. COMBAT & AIMBOT -->
-                <div style="margin-bottom:10px">
-                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">🎯 1. Combat & Aimbot</div>
-                    <ul style="margin:0 0 6px 16px;padding:0">
-                        <li><b>Triggerbot (Auto Fire):</b> Automatically fires whenever an enemy enters your crosshair/aim cone.</li>
-                        <li><b>Lead Prediction:</b> Accurately predicts bullet travel time against moving, jumping, or bunny-hopping targets.</li>
-                        <li><b>Aim Height:</b> Vertical offset adjustment. Default (0.35 - 0.40) aims at the upper egg head for instant critical damage.</li>
-                    </ul>
-                </div>
-
-                <!-- 2. 7-GUN WEAPON SWITCHER -->
-                <div style="margin-bottom:10px">
-                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">🔫 2. 7-Weapon Switcher & Instant Re-deploy</div>
-                    <ul style="margin:0 0 6px 16px;padding:0">
-                        <li>Scroll your <b>Mouse Wheel</b> or press keys <b>1 to 7</b> anywhere (lobby or in-game) to choose any of the 7 weapon classes.</li>
-                        <li><b>How Shell Shockers Works:</b> Guns are player classes assigned at spawn. When you select a gun mid-game, it queues for your next life.</li>
-                        <li><b>⚡ Instant Spawn:</b> Press <b>[K]</b> or click <i>Re-deploy</i> to spawn immediately with your new 3D gun in 0.3s!</li>
-                    </ul>
-                </div>
-
-                <!-- 3. KILL ALL FEATURE -->
-                <div style="margin-bottom:10px">
-                    <div style="color:#f87171;font-weight:bold;font-size:12px;margin-bottom:4px">💥 3. KILL ALL System</div>
-                    <ul style="margin:0 0 6px 16px;padding:0">
-                        <li>Press <b>[V]</b> or click the big red <i>KILL ALL</i> button.</li>
-                        <li>The script cycles through all enemies within range, aligns angles, refills clip to 999, clears firing cooldowns, and dispatches rapid confirmed hits.</li>
-                        <li>Works with all weapons (extra deadly with <b>RPEGG</b> explosive splash or <b>Crackshot</b> headshots).</li>
-                    </ul>
-                </div>
-
-                <!-- 4. SNIPER ZOOM -->
-                <div style="margin-bottom:10px">
-                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">🔭 4. Sniper Zoom (Binoculars Mode)</div>
-                    <ul style="margin:0 0 6px 16px;padding:0">
-                        <li>Press or hold <b>[C]</b> to drop FOV down to 25° for high-precision long-distance spotting with ANY gun.</li>
-                        <li>Configure <i>Toggle (Click)</i> vs <i>Hold Key</i> in the Combat tab.</li>
-                    </ul>
-                </div>
-
-                <!-- 5. TACTICAL & VISUALS -->
-                <div style="margin-bottom:10px">
-                    <div style="color:#38bdf8;font-weight:bold;font-size:12px;margin-bottom:4px">👁️ 5. Tactical Predictors & ESP</div>
-                    <ul style="margin:0 0 6px 16px;padding:0">
-                        <li><b>💣 Grenade Arc:</b> Real-time 3D parabolic trajectory line predicts bounce points and detonation location.</li>
-                        <li><b>Advance Shoot Point:</b> Cyber HUD center crosshair reticle that never goes missing and dynamically shifts colors on target lock.</li>
-                        <li><b>📊 Stats HUD:</b> Top-left corner widget tracking live FPS, killstreak (with 🔥 fire aura), total kills, deaths, and K/D.</li>
-                        <li><b>🛡️ Auto Escape:</b> Automatically raycasts floor points and teleports behind cover when your HP drops below 35.</li>
-                    </ul>
-                </div>
-            `;
-            pageGuide.appendChild(guideBox);
-
-            const pageCfg = tabPages.config;
+            head(pageCfg, 'Presets & Actions');
             const pRow = row(pageCfg, 'Presets');
             btn(pRow, 'Legit', () => applyPreset('legit'));
             btn(pRow, 'Rage', () => applyPreset('rage'));
@@ -3548,7 +3632,7 @@
 
             const info = document.createElement('div');
             info.style.cssText = 'color:#777;font-size:10px;margin-top:10px;line-height:1.4;border-top:1px solid #282828;padding-top:6px';
-            info.innerHTML = 'Menu toggle: <b>[~]</b> or <b>[Insert]</b><br>Aim: <b>Right-Click (Mouse2)</b>';
+            info.innerHTML = 'Menu toggle: <b>[~]</b> or <b>[Insert]</b><br>Weapon switch &amp; spawn: <b>[1] to [7]</b><br>Zoom: <b>Mouse Scroll Wheel</b>';
             pageCfg.appendChild(info);
 
             switchTab(activeTab);

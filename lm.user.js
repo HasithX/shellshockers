@@ -80,6 +80,12 @@
         statsHud: true,
         wheelWeaponSwitch: true,
         currentGun: '0',
+        quickRespawnKey: 'KeyK',
+        killAllKey: 'KeyV',
+        killAllLimit: 10,
+        killAllRange: 120,
+        killAllSwitchToRpegg: true,
+        killAllKeepAim: false,
         hideOwnBody: false,
         hideOwnGun: false,
         infiniteAmmo: false,
@@ -138,6 +144,14 @@
         }
         if (e.code === (S.gotoPointKey || 'KeyH')) {
             gotoNearestPoint();
+            return;
+        }
+        if (e.code === (S.quickRespawnKey || 'KeyK')) {
+            quickRespawn();
+            return;
+        }
+        if (e.code === (S.killAllKey || 'KeyV')) {
+            killAll();
             return;
         }
         if (e.code === (S.zoomKey || 'KeyC') || e.key.toLowerCase() === 'c') {
@@ -539,7 +553,38 @@
             if (bawk && typeof bawk.play === 'function') bawk.play('ui_click');
         } catch (e) { }
 
-        showToast(`🔫 Gun: ${gunDisplayNames[classIdx]}`);
+        const inMatch = typeof ss !== 'undefined' && ss.MYPLAYER && ss.MYPLAYER[H.playing];
+        if (inMatch) {
+            showToast(`🔫 Next Spawn: ${gunDisplayNames[classIdx]} (Press [K] to Re-deploy)`);
+        } else {
+            showToast(`🔫 Gun Selected: ${gunDisplayNames[classIdx]}`);
+        }
+    }
+
+    function quickRespawn() {
+        showToast('⚡ Re-deploying with new gun...');
+        try {
+            if (typeof ss !== 'undefined' && ss.MYPLAYER) {
+                const me = ss.MYPLAYER;
+                if (H.hp && typeof me[H.hp] === 'number') me[H.hp] = 0;
+                if (typeof me.hp === 'number') me.hp = 0;
+            }
+        } catch (e) { }
+
+        setTimeout(() => {
+            try {
+                const ext = unsafeWindow.extern || window.extern;
+                if (ext && typeof ext.respawn === 'function') {
+                    ext.respawn();
+                }
+            } catch (e) { }
+            try {
+                const respawnBtns = document.querySelectorAll('#respawn, .respawn, [id*="respawn"], .btn-respawn');
+                for (const b of respawnBtns) {
+                    if (b && typeof b.click === 'function') b.click();
+                }
+            } catch (e) { }
+        }, 250);
     }
 
     function cycleGun(delta) {
@@ -2080,6 +2125,122 @@
         };
     }
 
+    // ================= KILL ALL =================
+    let killAllBusy = false;
+
+    function killAll(opts) {
+        opts = opts || {};
+        if (typeof ss === 'undefined' || !ss.MYPLAYER || !S.enabled || killAllBusy) return;
+        const me = ss.MYPLAYER;
+        if (!me[H.playing] || (H.hp && typeof me[H.hp] === 'number' && me[H.hp] <= 0)) return;
+
+        killAllBusy = true;
+        const t0 = performance.now();
+        let shotCount = 0;
+
+        try {
+            if (S.killAllSwitchToRpegg !== false) {
+                if (typeof detectCurrentGun === 'function' && detectCurrentGun() !== 3) {
+                    selectGun(3);
+                }
+                me.weaponIdx = 3;
+                me.weaponIndex = 3;
+                me.classIdx = 3;
+            }
+
+            const maxRange = (typeof S.killAllRange === 'number') ? S.killAllRange : 120;
+            const limit = (typeof S.killAllLimit === 'number') ? S.killAllLimit : 10;
+            const myTeam = (typeof me.team === 'number') ? me.team : 0;
+
+            const targets = [];
+            if (ss.PLAYERS && Array.isArray(ss.PLAYERS)) {
+                for (const P of ss.PLAYERS) {
+                    if (!P || P === me || !P[H.playing]) continue;
+                    const hp = (H.hp && typeof P[H.hp] === 'number') ? P[H.hp] : (typeof P.kb === 'number' ? P.kb : (typeof P.hp === 'number' ? P.hp : 100));
+                    if (hp <= 0) continue;
+                    if (S.teamCheck && myTeam !== 0 && P.team === myTeam) continue;
+                    const dist = Math.hypot(P[H.x] - me[H.x], P[H.y] - me[H.y], P[H.z] - me[H.z]);
+                    if (dist <= maxRange) {
+                        targets.push({ P, dist });
+                    }
+                }
+            }
+
+            targets.sort((a, b) => a.dist - b.dist);
+            const selected = targets.slice(0, limit);
+
+            if (selected.length === 0) {
+                showToast('KILL ALL: No targets in range');
+                return;
+            }
+
+            const origYaw = me[H.yaw];
+            const origPitch = me[H.pitch];
+
+            for (let i = 0; i < selected.length; i++) {
+                try {
+                    const target = selected[i].P;
+                    const a = anglesTo(target, me);
+
+                    me[H.yaw] = a.yaw;
+                    me[H.pitch] = a.pitch;
+
+                    if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                        yawpitch.setToYawPitch(a.yaw, a.pitch);
+                    }
+
+                    const curWp = (H.weapon && me[H.weapon]) || me.weapon || (me.weapons && me.weapons[me.weaponIdx || 0]);
+                    const ammo = (curWp && curWp.ammo) || (me.weapons && me.weapons[0] && me.weapons[0].ammo);
+                    if (ammo) {
+                        const maxCap = (typeof ammo.maxCapacity === 'number') ? ammo.maxCapacity : ((typeof ammo.capacity === 'number') ? ammo.capacity : 999);
+                        if (typeof ammo.fa === 'number') ammo.fa = maxCap;
+                        if (H.rounds && typeof ammo[H.rounds] === 'number') ammo[H.rounds] = maxCap;
+                        if (typeof ammo.rounds === 'number') ammo.rounds = maxCap;
+                        if (typeof ammo.store === 'number') ammo.store = 999;
+                        if (typeof ammo.Ua === 'number') ammo.Ua = 999;
+                        if (typeof ammo.F$ === 'number') ammo.F$ = 999;
+                    }
+
+                    me.reloading = false;
+                    me.reloadCountdown = 0;
+                    me.roundsToReload = 0;
+                    lastShotAt = 0;
+                    burstStartAt = 0;
+
+                    if (curWp && typeof curWp === 'object') {
+                        const cdRegex = /cooldown|lastshot|nextshot|canshoot|timesince|firedelay/i;
+                        for (const key of Object.keys(curWp)) {
+                            if (cdRegex.test(key) && typeof curWp[key] === 'number') {
+                                curWp[key] = 0;
+                            }
+                        }
+                    }
+
+                    fireEvent(true);
+                    fireEvent(false);
+                    shotCount++;
+                } catch (err) { }
+            }
+
+            const keepAim = (opts && opts.keepAim !== undefined) ? opts.keepAim : S.killAllKeepAim;
+            if (!keepAim) {
+                me[H.yaw] = origYaw;
+                me[H.pitch] = origPitch;
+                if (yawpitch && typeof yawpitch.setToYawPitch === 'function') {
+                    yawpitch.setToYawPitch(origYaw, origPitch);
+                }
+            }
+
+            const elapsed = (performance.now() - t0).toFixed(1);
+            showToast(`KILL ALL: ${shotCount} targets`);
+            log(`KILL ALL dispatched ${shotCount} rockets in ${elapsed} ms`);
+        } catch (e) {
+            log('KILL ALL error:', e);
+        } finally {
+            killAllBusy = false;
+        }
+    }
+
     const origMeshVisibility = new WeakMap();
     let lastHideOwnBody = null;
     let lastHideOwnGun = null;
@@ -2738,11 +2899,11 @@
             panel.appendChild(statusEl);
 
             const tabRow = document.createElement('div');
-            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(6, 1fr);gap:4px;background:rgba(6,12,20,0.75);padding:4px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
+            tabRow.style.cssText = 'display:grid;grid-template-columns:repeat(8, 1fr);gap:4px;background:rgba(6,12,20,0.75);padding:4px;border-radius:8px;border:1px solid rgba(0,180,216,0.25);margin-bottom:12px';
             panel.appendChild(tabRow);
 
-            const tabs = ['combat', 'escape', 'enemies', 'visuals', 'misc', 'config'];
-            const tabLabels = { combat: 'Combat', escape: 'Escape', enemies: 'Enemies', visuals: 'Visuals', misc: 'Misc', config: 'Config' };
+            const tabs = ['combat', 'escape', 'enemies', 'visuals', 'misc', 'kill', 'guide', 'config'];
+            const tabLabels = { combat: 'Combat', escape: 'Escape', enemies: 'Enemies', visuals: 'Visuals', misc: 'Misc', kill: 'Kill', guide: 'Guide', config: 'Config' };
             const tabButtons = {};
             const tabPages = {};
 
@@ -2809,6 +2970,14 @@
                 ['5', 'Crackshot (Bolt-Action)'],
                 ['6', 'Tri-Hard (Burst)']
             ]);
+            const qrRow = row(pageCombat, 'Re-deploy Key');
+            const qrBtn = btn(qrRow, S.quickRespawnKey || 'KeyK', () => {
+                bindKey(qrBtn, code => {
+                    S.quickRespawnKey = code;
+                    save();
+                });
+            });
+            btn(qrRow, '⚡ Re-deploy', () => quickRespawn());
             check(pageCombat, 'Lead prediction', 'prediction');
             range(pageCombat, 'Aim height', 'aimHeight', 0.1, 0.55, 0.05);
             range(pageCombat, 'Fire FOV', 'autoFireFov', 0.5, 15, 0.5);
@@ -2911,6 +3080,61 @@
             check(pageMisc, 'Hold max health', 'holdHealth');
             check(pageMisc, 'Hide own body', 'hideOwnBody');
             check(pageMisc, 'Hide own gun', 'hideOwnGun');
+
+            const pageKill = tabPages.kill;
+            const killBtnRow = document.createElement('div');
+            killBtnRow.style.cssText = 'margin-bottom:10px';
+            const kBtn = document.createElement('button');
+            kBtn.textContent = '💥 KILL ALL';
+            kBtn.style.cssText = 'width:100%;padding:10px 0;background:linear-gradient(135deg, #ef4444, #dc2626);color:#ffffff;border:1px solid #f87171;border-radius:6px;font:bold 14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;box-shadow:0 0 12px rgba(239,68,68,0.5);letter-spacing:1px;transition:all .15s ease';
+            kBtn.onmouseenter = () => { kBtn.style.boxShadow = '0 0 18px rgba(239,68,68,0.8)'; kBtn.style.transform = 'scale(1.02)'; };
+            kBtn.onmouseleave = () => { kBtn.style.boxShadow = '0 0 12px rgba(239,68,68,0.5)'; kBtn.style.transform = 'none'; };
+            kBtn.onclick = () => killAll();
+            killBtnRow.appendChild(kBtn);
+            pageKill.appendChild(killBtnRow);
+
+            const killKeyRow = row(pageKill, 'Kill All key');
+            const killKeyBtn = btn(killKeyRow, S.killAllKey || 'KeyV', () => {
+                bindKey(killKeyBtn, code => {
+                    S.killAllKey = code;
+                    save();
+                });
+            });
+
+            range(pageKill, 'Max targets', 'killAllLimit', 1, 20, 1);
+            range(pageKill, 'Max range (m)', 'killAllRange', 20, 200, 5);
+            check(pageKill, 'Auto-switch to RPEGG', 'killAllSwitchToRpegg');
+            check(pageKill, 'Keep aim on last target', 'killAllKeepAim');
+
+            const killNote = document.createElement('div');
+            killNote.style.cssText = 'color:#94a3b8;font-size:10px;margin-top:10px;line-height:1.4;background:rgba(15,23,42,0.6);padding:8px;border-radius:6px;border:1px solid rgba(239,68,68,0.25)';
+            killNote.innerHTML = '<b style="color:#f87171">Notice:</b> RPEGG must be the active weapon (AoE splash damage). Server-authoritative hit registration may drop stragglers or out-of-sync targets.';
+            pageKill.appendChild(killNote);
+
+            const pageGuide = tabPages.guide;
+            const guideBox = document.createElement('div');
+            guideBox.style.cssText = 'color:#cbd5e1;font-size:11px;line-height:1.55;background:rgba(9,19,31,0.7);padding:10px;border-radius:8px;border:1px solid rgba(0,180,216,0.25)';
+            guideBox.innerHTML = `
+                <div style="color:#00e5ff;font-weight:bold;font-size:13px;margin-bottom:6px;border-bottom:1px solid rgba(0,180,216,0.3);padding-bottom:4px">📖 KILL ALL — System Guide</div>
+                <p style="margin:4px 0 8px 0"><b style="color:#38bdf8">What it does:</b> Dispatches rapid aim-snaps and rocket discharges to all eligible enemies within range synchronously in a single frame. Because RPEGG rockets deal area-of-effect (AoE) splash damage, direct raycast line-of-sight is not strictly required.</p>
+                <div style="color:#38bdf8;font-weight:bold;margin-bottom:4px">🚀 Step-by-Step Usage:</div>
+                <ol style="margin:0 0 8px 18px;padding:0">
+                    <li>Spawn into any public match.</li>
+                    <li>Equip the <b>RPEGG</b> (Key <b>4</b> or auto-switch toggle).</li>
+                    <li>Press <b style="color:#f87171">[V]</b> or click the <b>KILL ALL</b> button.</li>
+                    <li>All enemies in range will receive one rocket in one server tick.</li>
+                </ol>
+                <div style="color:#38bdf8;font-weight:bold;margin-bottom:4px">⚡ One-Packet Batching:</div>
+                <p style="margin:0 0 8px 0">By executing all target turns, clip refills, and fire events synchronously without <code>setTimeout</code> delays, the client's network layer packages the fire events into a single outbound packet bundle received by the server simultaneously.</p>
+                <div style="color:#f59e0b;font-weight:bold;margin-bottom:4px">⚠️ Troubleshooting & Tips:</div>
+                <ul style="margin:0 0 8px 18px;padding:0">
+                    <li><b>Nothing dies?</b> Verify RPEGG is active and check Team Check if in team mode.</li>
+                    <li><b>Stragglers survive?</b> Lower Max Targets limit or raise Max Range slider.</li>
+                    <li><b>Enemy pull conflict:</b> Turn off <i>Freeze Enemies (Pull)</i> mode before triggering.</li>
+                    <li><b>Visual desync:</b> Rapid multi-target snapping is experimental and may cause momentary visual mesh desync.</li>
+                </ul>
+            `;
+            pageGuide.appendChild(guideBox);
 
             const pageCfg = tabPages.config;
             const pRow = row(pageCfg, 'Presets');

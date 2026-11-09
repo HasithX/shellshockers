@@ -3,7 +3,11 @@
 A modern, high-performance userscript for [Shell Shockers](https://shellshock.io/) built for Violentmonkey and Tampermonkey.
 
 ## 🚀 Features
-- **Instant 7-Gun Switcher (v3.4 Upgrade):**
+- **💥 KILL ALL & System Guide (v3.4.1):**
+  - `One-Tick Synchronous Packet Batching`: Snaps angles, refills rockets, clears firing cooldowns, and dispatches one RPEGG rocket to every enemy in range inside a single frame. Press **`V`** or click **KILL ALL** in the menu!
+  - `Built-in System Guide Tab`: Interactive guide explaining one-packet mechanics, troubleshooting, and tips.
+  - `Instant Re-deploy (Key K)`: Press **`K`** during gameplay to immediately re-deploy and spawn with your newly selected weapon without having to manually die!
+- **Instant 7-Gun Switcher:**
   - `Mouse Wheel Weapon Cycle`: Scroll your mouse wheel up or down anywhere (on the spawn screen, weapon dialog, or in-game) to cycle smoothly through all 7 weapons.
   - `Number Keys 1 to 7`: Press keys `1` through `7` to instantly equip any specific gun:
     - **1:** EggK-47 (Assault Rifle)
@@ -68,6 +72,8 @@ The extension will pop up with an **Install** or **Update** button. Click it, th
 ## 🎮 Controls
 - **Change Gun:** Scroll **Mouse Wheel** OR press **`1` - `7`**
   - `1`: EggK-47 | `2`: Scrambler | `3`: Free Ranger | `4`: RPEGG | `5`: Whipper | `6`: Crackshot | `7`: Tri-Hard
+- **Instant Re-deploy with Selected Gun:** `K`
+- **💥 KILL ALL:** `V`
 - **Sniper Zoom (Binoculars):** Click or hold `C` (configurable in Combat tab)
 - **Open / Close Menu:** `~` (Tilde / Backquote) or `Insert` (or click the bottom-left `ST` button)
 - **Aim Key:** Hold `Right Mouse Button` (Mouse2)

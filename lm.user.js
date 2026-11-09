@@ -2396,26 +2396,34 @@
     let pendingEscape = null;
 
     function findTeamDialog() {
-        const candidates = document.querySelectorAll('div, form, section, [class*="modal"], [class*="dialog"], [class*="popup"]');
+        // Direct ID lookup for the Shell Shockers switch team popup modal
+        const popup = document.getElementById('switchTeamPopup');
+        if (popup && popup.offsetWidth > 40 && popup.offsetHeight > 40) {
+            const style = window.getComputedStyle(popup);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                return popup;
+            }
+        }
+
+        // Only scan elements with explicit modal/dialog class names - NEVER walk parents!
+        const candidates = document.querySelectorAll('.popup, .modal, .ss_modal, [class*="popup"], [class*="dialog"]');
         for (let i = 0; i < candidates.length; i++) {
             const el = candidates[i];
             if (dismissedDialogs.has(el)) continue;
+            // Must be a small popup card, NEVER the whole screen/app
+            if (el.offsetWidth < 50 || el.offsetHeight < 50 || el.offsetWidth > 650 || el.offsetHeight > 550) continue;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
             const txt = (el.textContent || '');
-            if (txt.includes('SWITCH TO TEAM') || txt.includes('Your score will be reset')) {
-                let dlg = el;
-                while (dlg && dlg.parentElement && dlg.parentElement !== document.body && dlg.parentElement !== document.documentElement) {
-                    const pt = dlg.parentElement.textContent || '';
-                    if (!pt.includes('SWITCH TO TEAM') && !pt.includes('Your score will be reset')) break;
-                    if (dlg.parentElement.children.length > 6) break;
-                    dlg = dlg.parentElement;
-                }
-                if (!dismissedDialogs.has(dlg)) return dlg;
+            if (txt.includes('SWITCH TO TEAM') && txt.includes('Your score will be reset')) {
+                return el;
             }
         }
         return null;
     }
 
     function clickDialogChoice(dlg, choice) {
+        if (!dlg) return false;
         const btns = dlg.querySelectorAll('button, a, div[role="button"], input[type="button"], [class*="btn"]');
         for (let i = 0; i < btns.length; i++) {
             const b = btns[i];
@@ -2426,19 +2434,6 @@
                     b.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
                     if (typeof b.click === 'function') b.click();
-                } catch (e) { }
-                return true;
-            }
-        }
-        const all = dlg.querySelectorAll('*');
-        for (let i = 0; i < all.length; i++) {
-            const el = all[i];
-            if (el.children.length === 0 && (el.textContent || '').trim().toLowerCase() === choice.toLowerCase()) {
-                try {
-                    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-                    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                    if (typeof el.click === 'function') el.click();
                 } catch (e) { }
                 return true;
             }
@@ -2489,54 +2484,67 @@
         } catch (e) { }
     }
 
+    function restoreGameUIIfNeeded() {
+        try {
+            // Restore any UI container that might have had style.display='none' inadvertently set
+            const roots = document.querySelectorAll('main, #app, #home_screen, #play_game, #playSection');
+            for (const r of roots) {
+                if (r && r.style && r.style.display === 'none') {
+                    r.style.display = '';
+                }
+                if (r && r.style && r.style.pointerEvents === 'none') {
+                    r.style.pointerEvents = '';
+                }
+            }
+        } catch (e) { }
+    }
+
     function dialogWatchdog(me) {
         try {
             hookTeamSwitchProtection();
+            restoreGameUIIfNeeded();
+
+            // ONLY run watchdog when actually alive in a match!
+            // Never touch anything on the home screen or start menu!
+            if (!isPlayerAliveInMatch()) {
+                dialogDetected = false;
+                return;
+            }
+
             const dlg = findTeamDialog();
             if (dlg) {
                 dialogDetected = true;
-                const alive = isPlayerAliveInMatch();
-                // If the player is currently alive in match, this modal is an unwanted interruption:
-                // Dismiss it IMMEDIATELY (0ms delay) and re-lock mouse pointer!
-                const waitTime = alive ? 0 : 1200;
                 if (activeDialogNode !== dlg) {
                     activeDialogNode = dlg;
                     dialogFirstSeen = Date.now();
                 }
-                if (Date.now() - dialogFirstSeen >= waitTime) {
-                    const choice = S.autoAcceptTeamSwitch ? 'Yes' : 'No';
-                    clickDialogChoice(dlg, choice);
+                const choice = S.autoAcceptTeamSwitch ? 'Yes' : 'No';
+                clickDialogChoice(dlg, choice);
 
-                    // Force hide it immediately so it doesn't freeze display
-                    try {
-                        dlg.style.display = 'none';
-                        dlg.style.pointerEvents = 'none';
-                    } catch (e) { }
+                if (!dialogPollTimer) {
+                    const targetNode = dlg;
+                    const pollStart = Date.now();
+                    dialogPollTimer = setInterval(() => {
+                        const stillOpen = document.body && document.body.contains(targetNode) &&
+                            targetNode.offsetWidth > 40 && targetNode.offsetHeight > 40 &&
+                            window.getComputedStyle(targetNode).display !== 'none';
+                        const timedOut = Date.now() - pollStart > 500;
+                        if (!stillOpen || timedOut) {
+                            clearInterval(dialogPollTimer);
+                            dialogPollTimer = null;
+                            dismissedDialogs.add(targetNode);
+                            if (activeDialogNode === targetNode) activeDialogNode = null;
+                            dialogDetected = false;
 
-                    if (!dialogPollTimer) {
-                        const targetNode = dlg;
-                        const pollStart = Date.now();
-                        dialogPollTimer = setInterval(() => {
-                            const stillOpen = document.body && document.body.contains(targetNode) &&
-                                (targetNode.offsetWidth > 0 || targetNode.offsetHeight > 0);
-                            const timedOut = Date.now() - pollStart > 500;
-                            if (!stillOpen || timedOut) {
-                                clearInterval(dialogPollTimer);
-                                dialogPollTimer = null;
-                                dismissedDialogs.add(targetNode);
-                                if (activeDialogNode === targetNode) activeDialogNode = null;
-                                dialogDetected = false;
-
-                                const canvas = document.getElementById('canvas') || document.querySelector('canvas');
-                                if (canvas && typeof canvas.requestPointerLock === 'function') {
-                                    try { canvas.requestPointerLock(); } catch (e) { }
-                                }
-                                lastShotAt = 0;
-                                showToast('dialog auto-dismissed');
-                                flushQueuedActions();
+                            const canvas = document.getElementById('canvas') || document.querySelector('canvas');
+                            if (canvas && typeof canvas.requestPointerLock === 'function') {
+                                try { canvas.requestPointerLock(); } catch (e) { }
                             }
-                        }, 50);
-                    }
+                            lastShotAt = 0;
+                            showToast('dialog auto-dismissed');
+                            flushQueuedActions();
+                        }
+                    }, 50);
                 }
             } else {
                 dialogDetected = false;

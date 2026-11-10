@@ -247,8 +247,10 @@
     }
 
     function dispatchCanvasPointer(down) {
+        if (!document.pointerLockElement || !isPlayerAliveInMatch()) return;
         const canvas = document.getElementById('canvas') || document.querySelector('canvas');
-        const el = canvas || document.body || document.documentElement;
+        if (!canvas) return;
+        const el = canvas;
         const pType = down ? 'pointerdown' : 'pointerup';
         const mType = down ? 'mousedown' : 'mouseup';
         const cx = Math.round(window.innerWidth / 2);
@@ -297,6 +299,7 @@
     }
 
     function fireEvent(down) {
+        if (down && (!document.pointerLockElement || !isPlayerAliveInMatch())) return;
         try {
             if (down) {
                 lastShotAt = Date.now();
@@ -403,11 +406,20 @@
     function isPointerLockAllowed() {
         if (panel) return false;
         try {
+            const ext = unsafeWindow.extern || window.extern;
+            if (ext && ext.inGame === false) return false;
             const va = unsafeWindow.vueApp || window.vueApp;
             if (va) {
                 if (va.screens && va.showScreen === va.screens.home) return false;
+                if (va.screens && va.showScreen === va.screens.equip) return false;
                 if (va.isRespawning || (va.game && va.game.isPaused)) return false;
                 if (va.game && va.game.pauseScreen && va.game.pauseScreen.showMenu) return false;
+            }
+        } catch (e) { }
+        try {
+            const playBtn = document.querySelector('#respawnBtn, #play_game, .btn-respawn');
+            if (playBtn && (playBtn.offsetParent !== null || window.getComputedStyle(playBtn).display !== 'none')) {
+                return false;
             }
         } catch (e) { }
         return isPlayerAliveInMatch();
@@ -482,9 +494,28 @@
 
     function isPlayerAliveInMatch() {
         if (typeof ss === 'undefined' || !ss.MYPLAYER) return false;
+        try {
+            const ext = unsafeWindow.extern || window.extern;
+            if (ext && ext.inGame === false) return false;
+            const va = unsafeWindow.vueApp || window.vueApp;
+            if (va) {
+                if (va.screens && va.showScreen === va.screens.home) return false;
+                if (va.screens && va.showScreen === va.screens.equip) return false;
+                if (va.isRespawning || (va.game && va.game.isPaused)) return false;
+                if (va.game && va.game.pauseScreen && va.game.pauseScreen.showMenu) return false;
+            }
+        } catch (e) { }
+        try {
+            const playBtn = document.querySelector('#respawnBtn, #play_game, .btn-respawn');
+            if (playBtn && (playBtn.offsetParent !== null || window.getComputedStyle(playBtn).display !== 'none')) {
+                return false;
+            }
+        } catch (e) { }
         const me = ss.MYPLAYER;
+        if (!me[H.playing]) return false;
+        if (!me[H.actor] || !me[H.actor][H.mesh]) return false;
         const myHp = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : (typeof me.hp === 'number' ? me.hp : 100));
-        return !!(me[H.playing] && myHp > 0);
+        return myHp > 0;
     }
 
     function selectGun(classIdx) {
@@ -533,7 +564,7 @@
             }
         } catch (e) { }
 
-        // 4. Update the weapon grid visually in DOM (without bubbling)
+        // 4. Update the weapon grid visually in DOM (without dispatching bubbling clicks)
         try {
             const weaponGrid = document.querySelector('#weapon_select .weapon-grid, #weapon_select');
             if (weaponGrid) {
@@ -544,8 +575,9 @@
                     if (item.classList.contains('btn_team_switch') || item.closest('.btn_team_switch')) continue;
                     const html = (item.innerHTML || '') + ' ' + (item.getAttribute('name') || '');
                     if (html.toLowerCase().includes(targetKey) || i === classIdx) {
-                        item.dispatchEvent(new MouseEvent('click', { bubbles: false, cancelable: true, view: window }));
-                        break;
+                        item.classList.add('weapon_selected');
+                    } else {
+                        item.classList.remove('weapon_selected');
                     }
                 }
             }
@@ -645,9 +677,7 @@
     }, { passive: true });
 
     function restorePointerLock() {
-        if (HTMLCanvasElement.prototype.requestPointerLock && HTMLCanvasElement.prototype.requestPointerLock.__lmHooked) {
-            HTMLCanvasElement.prototype.requestPointerLock = origCanvasRequestPointerLock;
-        }
+        // Keep hook intact so pointer lock is permanently guarded against accidental background locks
     }
 
     const originalAddEventListener = EventTarget.prototype.addEventListener;
@@ -668,7 +698,7 @@
                     const ol = listener;
                     listener = function (ev) { return yawpitch.listenerHook(ev, ol); };
                     listener.__lmUI = true;
-                } else if (isGameTarget) {
+                } else if (isCanvas) {
                     if (type === 'pointerdown' || type === 'mousedown') {
                         if (!fireDown.some(x => x.target === this && x.fn === listener)) fireDown.push({ target: this, fn: listener, type });
                     }
@@ -689,6 +719,7 @@
         realTarget: null,
         listenerHook: (ev, ol) => ol.call(yawpitch.listenerTarget || window, ev),
         movePointer: (mx = 0, my = 0) => {
+            if (!document.pointerLockElement || !isPlayerAliveInMatch()) return;
             try { yawpitch.setMouseParams(); } catch (e) { }
             const ev = makeFakeEvent('pointermove', false, {
                 movementX: Math.ceil(mx),
@@ -732,6 +763,7 @@
         accX: 0,
         accY: 0,
         setToYawPitch: (yaw = 0, pitch = 0) => {
+            if (!document.pointerLockElement || !isPlayerAliveInMatch()) return;
             if (!ss.MYPLAYER) return;
             const curYaw = ss.MYPLAYER[H.yaw] || 0;
             const curPitch = ss.MYPLAYER[H.pitch] || 0;
@@ -1276,7 +1308,7 @@
             } catch (e) { }
         }
 
-        if (S.holdHealth) {
+        if (S.holdHealth && isPlayerAliveInMatch()) {
             me.kb = 100;
             if (H.hp && H.hp in me) me[H.hp] = 100;
         }
@@ -2660,9 +2692,11 @@
                                 if (va && typeof va.setDarkOverlay === 'function') va.setDarkOverlay(false);
                             } catch (e) { }
 
-                            const canvas = document.getElementById('canvas') || document.querySelector('canvas');
-                            if (canvas && typeof canvas.requestPointerLock === 'function') {
-                                try { canvas.requestPointerLock(); } catch (e) { }
+                            if (isPointerLockAllowed()) {
+                                const canvas = document.getElementById('canvas') || document.querySelector('canvas');
+                                if (canvas && typeof canvas.requestPointerLock === 'function') {
+                                    try { canvas.requestPointerLock(); } catch (e) { }
+                                }
                             }
                             lastShotAt = 0;
                             showToast('dialog auto-dismissed');
@@ -2753,8 +2787,7 @@
             yawpitch.magicValue = 0.0025 * Math.max(0.15, S.smooth);
 
             // Release pointer lock on death or inactive so player can freely click Play/Respawn!
-            const myHpVal = (H.hp && typeof me[H.hp] === 'number') ? me[H.hp] : (typeof me.kb === 'number' ? me.kb : 100);
-            const isMeAlive = !!me[H.playing] && myHpVal > 0;
+            const isMeAlive = isPlayerAliveInMatch();
             if (!isMeAlive) {
                 if (document.pointerLockElement) {
                     try { document.exitPointerLock(); } catch (e) { }
@@ -2771,7 +2804,12 @@
                 // When death screen appears, apply the queued weapon choice!
                 setTimeout(() => {
                     if (currentGunIdx !== null && currentGunIdx !== undefined) {
-                        selectGun(currentGunIdx);
+                        try {
+                            const ext = unsafeWindow.extern || window.extern;
+                            if (ext && typeof ext.changeClass === 'function') ext.changeClass(currentGunIdx);
+                            const vd = unsafeWindow.vueData || window.vueData;
+                            if (vd) vd.classIdx = currentGunIdx;
+                        } catch (e) { }
                     }
                 }, 100);
             } else if (!wasAlive && isMeAlive) {
@@ -2974,7 +3012,7 @@
                 }
             }
 
-            if (aiming() && target) {
+            if (aiming() && target && isMeAlive && document.pointerLockElement) {
                 if (S.mode === 'advanced') {
                     yawpitch.setToYawPitch(target.yaw, target.pitch);
                     lastTargetPlayer = target.P;
@@ -2989,6 +3027,10 @@
             } else if (!S.autoFire) {
                 wantFire = false;
             } else if ((panel || dialogDetected) && !S.autoFireWhenMenuOpen) {
+                wantFire = false;
+            } else if (!document.pointerLockElement) {
+                wantFire = false;
+            } else if (!isMeAlive) {
                 wantFire = false;
             } else if (!autoFireEnemy) {
                 wantFire = false;
@@ -3656,15 +3698,15 @@
                 panel.remove();
                 panel = null;
                 statusEl = null;
-                restorePointerLock();
                 document.body.style.cursor = '';
-                const c = document.querySelector('canvas');
-                try {
-                    if (c && c.requestPointerLock && !document.pointerLockElement) c.requestPointerLock();
-                } catch (e) { }
+                if (isPointerLockAllowed()) {
+                    const c = document.querySelector('canvas');
+                    try {
+                        if (c && c.requestPointerLock && !document.pointerLockElement) c.requestPointerLock();
+                    } catch (e) { }
+                }
                 return;
             }
-            hookPointerLock();
             try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) { }
             document.body.style.cursor = 'default';
             buildPanel();
